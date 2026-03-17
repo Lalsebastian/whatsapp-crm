@@ -46,7 +46,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// ─── Supabase session helpers ──────────────────────────────────────────────
+// ─── Supabase helpers ──────────────────────────────────────────────────────
 async function getSession(phone) {
   const res = await axios.get(
     `${SUPABASE_URL}/rest/v1/sessions?phone=eq.${phone}&select=*`,
@@ -71,7 +71,6 @@ async function setState(phone, state, data = {}) {
   );
 }
 
-// ─── Save lead to Supabase ─────────────────────────────────────────────────
 async function saveLead(leadData) {
   await axios.post(
     `${SUPABASE_URL}/rest/v1/leads`,
@@ -90,63 +89,72 @@ async function saveLead(leadData) {
 // ─── Button router ─────────────────────────────────────────────────────────
 async function handleButton(from, id, session) {
 
-  // Start / main
-  if (id === 'gents_salon') return showGentsSalon(from);
+  // Welcome
+  if (id === 'gents_main')  return showGentsMain(from);
+  if (id === 'ladies_main') return showLadiesMain(from);
 
-  // Gents salon menu
-  if (id === 'services')     return showServices(from);
-  if (id === 'appointments') return startAppointment(from);
-  if (id === 'locations')    return showLocations(from);
-  if (id === 'products')     return showProducts(from);
-  if (id === 'offers')       return showOffers(from);
+  // ── Gents main menu ──
+  if (id === 'gents_services')     return showGentsServices(from);
+  if (id === 'gents_appointments') return showGentsBranches(from, session);
+  if (id === 'gents_location')     return showGentsLocation(from);
+  if (id === 'gents_products')     return showGentsProducts(from);
+  if (id === 'gents_offers')       return showGentsOffers(from);
 
-  // Service categories
-  if (id === 'hair')         return showHair(from);
-  if (id === 'straightening') return showStraightening(from);
-  if (id === 'facial')       return showFacial(from);
-  if (id === 'manicure')     return showManicure(from);
-  if (id === 'threading')    return showThreading(from);
+  // Gents services
+  if (id === 'g_hair')      return showGentsHair(from);
+  if (id === 'g_straight')  return showGentsStraightening(from);
+  if (id === 'g_facial')    return showGentsFacial(from);
+  if (id === 'g_manicure')  return showGentsManicure(from);
+  if (id === 'g_threading') return showGentsThreading(from);
 
-  // Appointment - select service
-  if (id === 'srv_haircut')  return saveService(from, session, 'Haircut / Beard');
-  if (id === 'srv_coloring') return saveService(from, session, 'Hair Coloring');
-  if (id === 'srv_facial')   return saveService(from, session, 'Facial');
-  if (id === 'srv_manicure') return saveService(from, session, 'Manicure & Pedicure');
-  if (id === 'srv_wax')      return saveService(from, session, 'Waxing / Threading');
+  // Gents branches
+  if (id === 'g_branch_muteena') return saveBranch(from, session, 'Gents - Muteena');
+  if (id === 'g_branch_dip')     return saveBranch(from, session, 'Gents - DIP');
 
-  // Appointment - select branch
-  if (id === 'branch_satwa')   return saveBranch(from, session, 'Al Satwa');
-  if (id === 'branch_jafliya') return saveBranch(from, session, 'Al Jafliya');
-  if (id === 'branch_jebel')   return saveBranch(from, session, 'Jebel Ali');
-  if (id === 'branch_deira')   return saveBranch(from, session, 'Deira');
-  if (id === 'branch_sharjah') return saveBranch(from, session, 'Sharjah');
+  // ── Ladies main menu ──
+  if (id === 'ladies_services')     return showLadiesServices(from);
+  if (id === 'ladies_appointments') return showLadiesBranches(from, session);
+  if (id === 'ladies_location')     return showLadiesLocation(from);
+  if (id === 'ladies_products')     return showLadiesProducts(from);
+  if (id === 'ladies_offers')       return showLadiesOffers(from);
 
-  // Appointment - select time
-  if (id === 'time_9')  return saveTime(from, session, '09-10 AM');
-  if (id === 'time_10') return saveTime(from, session, '10-11 AM');
-  if (id === 'time_11') return saveTime(from, session, '11-12 PM');
-  if (id === 'time_12') return saveTime(from, session, '12-01 PM');
-  if (id === 'time_1')  return saveTime(from, session, '01-02 PM');
+  // Ladies services
+  if (id === 'l_threading') return showLadiesThreading(from);
+  if (id === 'l_waxing')    return showLadiesWaxing(from);
+  if (id === 'l_hair')      return showLadiesHair(from);
+  if (id === 'l_facial')    return showLadiesFacial(from);
+  if (id === 'l_body')      return showLadiesBody(from);
+  if (id === 'l_nails')     return showLadiesNails(from);
+  if (id === 'l_henna')     return showLadiesHenna(from);
+
+  // Ladies branches
+  if (id === 'l_branch_muteena') return saveBranch(from, session, 'Ladies - Muteena');
+  if (id === 'l_branch_dip')     return saveBranch(from, session, 'Ladies - DIP');
+
+  // Time slots (shared)
+  if (id === 'time1') return saveTime(from, session, '09-10 AM');
+  if (id === 'time2') return saveTime(from, session, '10-11 AM');
+  if (id === 'time3') return saveTime(from, session, '11-12 PM');
+  if (id === 'time4') return saveTime(from, session, '12-01 PM');
 }
 
 // ─── Text router ───────────────────────────────────────────────────────────
 async function handleText(from, text, session) {
   const lower = text.toLowerCase();
 
-  // Always allow restart
   if (['hi', 'hello', 'hey', 'start', 'menu', 'hii'].includes(lower)) {
     return showWelcome(from);
   }
 
   const { state, data } = session;
 
-  // Collecting name for appointment
+  // Collecting name
   if (state === 'AWAIT_NAME') {
-    await setState(from, 'SELECT_SERVICE', { ...data, name: text });
-    return showSelectService(from);
+    const newData = { ...data, name: text };
+    await setState(from, 'SELECT_TIME', newData);
+    return showTimeSlots(from);
   }
 
-  // Fallback
   return showWelcome(from);
 }
 
@@ -154,206 +162,292 @@ async function handleText(from, text, session) {
 async function showWelcome(from) {
   await setState(from, 'IDLE', {});
   await sendButtons(from,
-    `Welcome to Madina Saloon! We're excited to help you look and feel your best.\n\nTo help us assist you faster, please let us know which service you are interested in by choosing from the options below:`,
-    [{ id: 'gents_salon', title: 'Gents Salon' }]
-  );
-}
-
-// ─── Gents salon main menu ─────────────────────────────────────────────────
-async function showGentsSalon(from) {
-  await sendListMessage(from,
-    'Please choose an option:',
-    'View options',
+    `Welcome to Madina Saloon! We're excited to help you look and feel your best.\n\nTo help us assist you faster, please choose your preferred salon:`,
     [
-      {
-        title: 'Main Menu',
-        rows: [
-          { id: 'services',     title: 'SERVICES',           description: 'View all services & prices' },
-          { id: 'appointments', title: 'APPOINTMENTS',        description: 'Book an appointment' },
-          { id: 'locations',    title: 'LOCATIONS & TIMING',  description: 'Find our branches' },
-          { id: 'products',     title: 'PRODUCTS',            description: 'View our products' },
-          { id: 'offers',       title: 'OFFERS',              description: 'Special packages & deals' },
-        ]
-      }
+      { id: 'gents_main', title: 'Gents Saloon' },
+      { id: 'ladies_main', title: 'Ladies Saloon' },
     ]
   );
 }
 
-// ─── Services menu ─────────────────────────────────────────────────────────
-async function showServices(from) {
+// ═══════════════════════════════════════════════════════
+// GENTS FLOWS
+// ═══════════════════════════════════════════════════════
+
+async function showGentsMain(from) {
+  await sendListMessage(from,
+    `Welcome to Madina Gents Saloon!\nPlease choose an option:`,
+    'View options',
+    [{
+      title: 'Gents Saloon',
+      rows: [
+        { id: 'gents_services',     title: 'Services',          description: 'View all services & prices' },
+        { id: 'gents_appointments', title: 'Appointments',       description: 'Book an appointment' },
+        { id: 'gents_location',     title: 'Locations & Timing', description: 'Find our branches' },
+        { id: 'gents_products',     title: 'Products',           description: 'View our products' },
+        { id: 'gents_offers',       title: 'Offers',             description: 'Special packages & deals' },
+      ]
+    }]
+  );
+}
+
+async function showGentsServices(from) {
   await sendListMessage(from,
     'Select a service category:',
-    'View services',
-    [
-      {
-        title: 'Service Categories',
-        rows: [
-          { id: 'hair',          title: 'Hair Cut & Coloring',    description: 'Cuts, shaving, coloring' },
-          { id: 'straightening', title: 'Hair Straightening',     description: 'Spa, botox, keratin' },
-          { id: 'facial',        title: 'Facial & Bleaching',     description: 'Facials, massage, scrubs' },
-          { id: 'manicure',      title: 'Manicure & Pedicure',    description: 'Full service 30 AED' },
-          { id: 'threading',     title: 'Threading & Waxing',     description: 'Threading, waxing options' },
-        ]
-      }
-    ]
-  );
-}
-
-// ─── Individual service pages ──────────────────────────────────────────────
-async function showHair(from) {
-  await sendButtons(from,
-    `💇 Hair Services:\n\n• Hair Cutting: 5 AED\n• Shaving / Beard Trim: 5 AED\n• Hair Coloring: 10 / 15 / 20 / 25 AED`,
-    [{ id: 'appointments', title: 'Book appointment' }, { id: 'services', title: 'Back' }]
-  );
-}
-
-async function showStraightening(from) {
-  await sendButtons(from,
-    `✨ Hair Treatments:\n\n• Hair Spa: 15 AED\n• Hair Straightening: 25 AED\n• Hair Botox: 100 AED\n• Keratin: 80 AED\n• Protein: 80 AED\n• Smoothing / Rebonding: 80 AED`,
-    [{ id: 'appointments', title: 'Book appointment' }, { id: 'services', title: 'Back' }]
-  );
-}
-
-async function showFacial(from) {
-  await sendButtons(from,
-    `🧴 Facial & Skin Care:\n\n• Facial: 30 AED\n• Collagen Facial: 40 AED\n• Face Massage: 10 AED\n• Face + Neck Bleach: 20 AED\n• Face Scrub: 5 AED`,
-    [{ id: 'appointments', title: 'Book appointment' }, { id: 'services', title: 'Back' }]
-  );
-}
-
-async function showManicure(from) {
-  await sendButtons(from,
-    `💅 Manicure & Pedicure:\n\n• Full Service: 30 AED`,
-    [{ id: 'appointments', title: 'Book appointment' }, { id: 'services', title: 'Back' }]
-  );
-}
-
-async function showThreading(from) {
-  await sendButtons(from,
-    `🧵 Threading & Waxing:\n\n• Full Face Threading: 5 AED\n• Hand Wax: 10 AED\n• Underarm: 15 AED\n• Full Arm: 40 AED\n• Half Arm: 20 AED\n• Chest: 50 AED\n• Face Wax: 10 AED\n• Nose Wax: 3 AED`,
-    [{ id: 'appointments', title: 'Book appointment' }, { id: 'services', title: 'Back' }]
-  );
-}
-
-// ─── Locations ─────────────────────────────────────────────────────────────
-async function showLocations(from) {
-  await sendButtons(from,
-    `📍 Our Locations:\n\n• Al Satwa\n• Al Jafliya\n• Jebel Ali\n• Hor Al Anz\n• Deira\n• Al Qusais\n• Muhaisnah\n• DIP-2\n• Sharjah\n\nReply with your preferred area for the exact location link.`,
-    [{ id: 'gents_salon', title: 'Back to menu' }]
-  );
-}
-
-// ─── Products ──────────────────────────────────────────────────────────────
-async function showProducts(from) {
-  await sendButtons(from,
-    `🛍️ Product Categories:\n\n• Hair Care Products\n• Skin Care Products\n• Scrubs & Massage Creams\n• Facial Kits\n• Wax Products\n• Tools & Equipment`,
-    [{ id: 'gents_salon', title: 'Back to menu' }]
-  );
-}
-
-// ─── Offers ────────────────────────────────────────────────────────────────
-async function showOffers(from) {
-  await sendButtons(from,
-    `🔥 Special Offers:\n\n💥 25 AED Package:\nHaircut + Beard + Face Wax + Head Massage\n\n💥 30 AED Package:\nHaircut + Beard + Face Massage + Hair Color\n\n💥 40 AED Package:\nHaircut + Beard + Facial + Head Massage`,
-    [{ id: 'appointments', title: 'Book now' }, { id: 'gents_salon', title: 'Back to menu' }]
-  );
-}
-
-// ─── Appointment flow ──────────────────────────────────────────────────────
-async function startAppointment(from) {
-  await setState(from, 'AWAIT_NAME', {});
-  await sendText(from, `Great choice! 👍\nLet's book your appointment.\n\nPlease enter your *Name*:`);
-}
-
-async function showSelectService(from) {
-  await sendListMessage(from,
-    'Please select the service:',
     'Choose service',
+    [{
+      title: 'Gents Services',
+      rows: [
+        { id: 'g_hair',      title: 'Hair Cut & Coloring',  description: 'Cuts, shaving, coloring' },
+        { id: 'g_straight',  title: 'Hair Straightening',   description: 'Keratin, botox, protein' },
+        { id: 'g_facial',    title: 'Facial & Bleaching',   description: 'Facials, massage, scrubs' },
+        { id: 'g_manicure',  title: 'Manicure & Pedicure',  description: 'Full service available' },
+        { id: 'g_threading', title: 'Threading & Waxing',   description: 'Threading & waxing options' },
+      ]
+    }]
+  );
+}
+
+async function showGentsHair(from) {
+  await sendButtons(from,
+    `Hair Services:\n\n• Hair Cutting: 5 AED\n• Shaving / Beard Trim: 5 AED\n• Hair Coloring: 10 / 15 / 20 / 25 AED`,
+    [{ id: 'gents_appointments', title: 'Book appointment' }, { id: 'gents_services', title: 'Back' }]
+  );
+}
+
+async function showGentsStraightening(from) {
+  await sendButtons(from,
+    `Hair Treatments:\n\n• Hair Spa: 15 AED\n• Hair Straightening: 25 AED\n• Hair Botox: 100 AED\n• Keratin: 80 AED\n• Protein: 80 AED\n• Smoothing / Rebonding: 80 AED`,
+    [{ id: 'gents_appointments', title: 'Book appointment' }, { id: 'gents_services', title: 'Back' }]
+  );
+}
+
+async function showGentsFacial(from) {
+  await sendButtons(from,
+    `Facial & Skin Care:\n\n• Facial: 30 AED\n• Collagen Facial: 40 AED\n• Face Massage: 10 AED\n• Face + Neck Bleach: 20 AED\n• Face Scrub: 5 AED`,
+    [{ id: 'gents_appointments', title: 'Book appointment' }, { id: 'gents_services', title: 'Back' }]
+  );
+}
+
+async function showGentsManicure(from) {
+  await sendButtons(from,
+    `Manicure & Pedicure:\n\n• Full Service: 30 AED`,
+    [{ id: 'gents_appointments', title: 'Book appointment' }, { id: 'gents_services', title: 'Back' }]
+  );
+}
+
+async function showGentsThreading(from) {
+  await sendButtons(from,
+    `Threading & Waxing:\n\n• Full Face Threading: 5 AED\n• Hand Wax: 10 AED\n• Underarm: 15 AED\n• Full Arm: 40 AED\n• Half Arm: 20 AED\n• Chest: 50 AED\n• Face Wax: 10 AED\n• Nose Wax: 3 AED`,
+    [{ id: 'gents_appointments', title: 'Book appointment' }, { id: 'gents_services', title: 'Back' }]
+  );
+}
+
+async function showGentsLocation(from) {
+  await sendButtons(from,
+    `📍 Gents Saloon Locations:\n\n• Muteena Branch\n• DIP Branch\n\nTiming: 9:00 AM - 10:00 PM\nDays: Monday to Sunday`,
+    [{ id: 'gents_main', title: 'Back to menu' }]
+  );
+}
+
+async function showGentsProducts(from) {
+  await sendButtons(from,
+    `🛍️ Gents Products:\n\n• Hair Care Products\n• Skin Care Products\n• Beard Care\n• Styling Products\n• Tools & Equipment`,
+    [{ id: 'gents_main', title: 'Back to menu' }]
+  );
+}
+
+async function showGentsOffers(from) {
+  await sendButtons(from,
+    `🔥 Gents Special Offers:\n\n💥 25 AED Package:\nHaircut + Beard + Face Wax + Head Massage\n\n💥 30 AED Package:\nHaircut + Beard + Face Massage + Hair Color\n\n💥 40 AED Package:\nHaircut + Beard + Facial + Head Massage`,
+    [{ id: 'gents_appointments', title: 'Book now' }, { id: 'gents_main', title: 'Back to menu' }]
+  );
+}
+
+async function showGentsBranches(from, session) {
+  await setState(from, 'IDLE', { ...session.data, type: 'Gents' });
+  await sendButtons(from,
+    `Please select your preferred branch:`,
     [
-      {
-        title: 'Services',
-        rows: [
-          { id: 'srv_haircut',  title: 'Haircut / Beard',       description: 'Cut & beard trim' },
-          { id: 'srv_coloring', title: 'Hair Coloring',          description: 'Color & highlights' },
-          { id: 'srv_facial',   title: 'Facial',                 description: 'Facial & skin care' },
-          { id: 'srv_manicure', title: 'Manicure & Pedicure',    description: 'Full service' },
-          { id: 'srv_wax',      title: 'Waxing / Threading',     description: 'Threading & waxing' },
-        ]
-      }
+      { id: 'g_branch_muteena', title: 'Muteena' },
+      { id: 'g_branch_dip', title: 'DIP' },
     ]
   );
 }
 
-async function saveService(from, session, service) {
-  const data = { ...session.data, service };
-  await setState(from, 'SELECT_BRANCH', data);
+// ═══════════════════════════════════════════════════════
+// LADIES FLOWS
+// ═══════════════════════════════════════════════════════
+
+async function showLadiesMain(from) {
   await sendListMessage(from,
-    'Select your preferred branch:',
-    'Choose branch',
+    `Welcome to Madina Ladies Saloon!\nPlease choose an option:`,
+    'View options',
+    [{
+      title: 'Ladies Saloon',
+      rows: [
+        { id: 'ladies_services',     title: 'Services',          description: 'View all services & prices' },
+        { id: 'ladies_appointments', title: 'Appointments',       description: 'Book an appointment' },
+        { id: 'ladies_location',     title: 'Locations & Timing', description: 'Find our branches' },
+        { id: 'ladies_products',     title: 'Products',           description: 'View our products' },
+        { id: 'ladies_offers',       title: 'Offers',             description: 'Special packages & deals' },
+      ]
+    }]
+  );
+}
+
+async function showLadiesServices(from) {
+  await sendListMessage(from,
+    'Select a service category:',
+    'Choose service',
+    [{
+      title: 'Ladies Services',
+      rows: [
+        { id: 'l_threading', title: 'Threading',  description: 'Eyebrow, face, upper lips' },
+        { id: 'l_waxing',    title: 'Waxing',     description: 'Full body, underarms, bikini' },
+        { id: 'l_hair',      title: 'Hair',       description: 'Cut, spa, keratin' },
+        { id: 'l_facial',    title: 'Facial',     description: 'Hydra, gold facial' },
+        { id: 'l_body',      title: 'Body Care',  description: 'Moroccan bath, polish' },
+        { id: 'l_nails',     title: 'Nails',      description: 'Manicure & pedicure' },
+        { id: 'l_henna',     title: 'Henna',      description: 'Hands & hair henna' },
+      ]
+    }]
+  );
+}
+
+async function showLadiesThreading(from) {
+  await sendButtons(from,
+    `Threading:\n\n• Upper Lips: 5 AED\n• Chin: 5 AED\n• Eyebrow: 10 AED\n• Full Face: 30 AED`,
+    [{ id: 'ladies_appointments', title: 'Book appointment' }, { id: 'ladies_services', title: 'Back' }]
+  );
+}
+
+async function showLadiesWaxing(from) {
+  await sendButtons(from,
+    `Waxing:\n\n• Full Body: 150 AED\n• Underarms: 20 AED\n• Bikini: 50 AED`,
+    [{ id: 'ladies_appointments', title: 'Book appointment' }, { id: 'ladies_services', title: 'Back' }]
+  );
+}
+
+async function showLadiesHair(from) {
+  await sendButtons(from,
+    `Hair Services:\n\n• Hair Cut: 10 AED\n• Hair Spa: 30 AED\n• Keratin: 300 AED`,
+    [{ id: 'ladies_appointments', title: 'Book appointment' }, { id: 'ladies_services', title: 'Back' }]
+  );
+}
+
+async function showLadiesFacial(from) {
+  await sendButtons(from,
+    `Facial:\n\n• Hydra Facial: 200 AED\n• Gold Facial: 180 AED`,
+    [{ id: 'ladies_appointments', title: 'Book appointment' }, { id: 'ladies_services', title: 'Back' }]
+  );
+}
+
+async function showLadiesBody(from) {
+  await sendButtons(from,
+    `Body Care:\n\n• Moroccan Bath: 80 AED\n• Body Polish: 150 AED`,
+    [{ id: 'ladies_appointments', title: 'Book appointment' }, { id: 'ladies_services', title: 'Back' }]
+  );
+}
+
+async function showLadiesNails(from) {
+  await sendButtons(from,
+    `Nails:\n\n• Manicure: 30 AED\n• Pedicure: 40 AED`,
+    [{ id: 'ladies_appointments', title: 'Book appointment' }, { id: 'ladies_services', title: 'Back' }]
+  );
+}
+
+async function showLadiesHenna(from) {
+  await sendButtons(from,
+    `Henna:\n\n• Hands: 25 AED\n• Hair Henna: 40 AED`,
+    [{ id: 'ladies_appointments', title: 'Book appointment' }, { id: 'ladies_services', title: 'Back' }]
+  );
+}
+
+async function showLadiesLocation(from) {
+  await sendButtons(from,
+    `📍 Ladies Saloon Locations:\n\n• Muteena Branch\n• DIP Branch\n\nTiming: 9:00 AM - 10:00 PM\nDays: Monday to Sunday`,
+    [{ id: 'ladies_main', title: 'Back to menu' }]
+  );
+}
+
+async function showLadiesProducts(from) {
+  await sendButtons(from,
+    `🛍️ Ladies Products:\n\n• Hair Care Products\n• Skin Care Products\n• Scrubs & Massage Creams\n• Facial Kits\n• Wax Products\n• Nail Products`,
+    [{ id: 'ladies_main', title: 'Back to menu' }]
+  );
+}
+
+async function showLadiesOffers(from) {
+  await sendButtons(from,
+    `🔥 Ladies Special Offers:\n\n💥 Bridal Package:\nFull Body Wax + Facial + Henna\n\n💥 Glow Package:\nFacial + Body Polish + Nails\n\n💥 Refresh Package:\nMoroccan Bath + Hair Spa + Threading`,
+    [{ id: 'ladies_appointments', title: 'Book now' }, { id: 'ladies_main', title: 'Back to menu' }]
+  );
+}
+
+async function showLadiesBranches(from, session) {
+  await setState(from, 'IDLE', { ...session.data, type: 'Ladies' });
+  await sendButtons(from,
+    `Please select your preferred branch:`,
     [
-      {
-        title: 'Our Branches',
-        rows: [
-          { id: 'branch_satwa',   title: 'Al Satwa',   description: 'Dubai' },
-          { id: 'branch_jafliya', title: 'Al Jafliya', description: 'Dubai' },
-          { id: 'branch_jebel',   title: 'Jebel Ali',  description: 'Dubai' },
-          { id: 'branch_deira',   title: 'Deira',      description: 'Dubai' },
-          { id: 'branch_sharjah', title: 'Sharjah',    description: 'Sharjah' },
-        ]
-      }
+      { id: 'l_branch_muteena', title: 'Muteena' },
+      { id: 'l_branch_dip', title: 'DIP' },
     ]
   );
 }
+
+// ═══════════════════════════════════════════════════════
+// SHARED APPOINTMENT FLOW
+// ═══════════════════════════════════════════════════════
 
 async function saveBranch(from, session, branch) {
-  const data = { ...session.data, branch };
-  await setState(from, 'SELECT_TIME', data);
-  await sendListMessage(from,
-    'Choose your preferred time slot:',
-    'Choose time',
+  const newData = { ...session.data, branch };
+  await setState(from, 'AWAIT_NAME', newData);
+  await sendText(from, `Please enter your *Name*:`);
+}
+
+async function showTimeSlots(from) {
+  await sendButtons(from,
+    `Select your preferred time slot:`,
     [
-      {
-        title: 'Available Time Slots',
-        rows: [
-          { id: 'time_9',  title: '09-10 AM', description: 'Morning slot' },
-          { id: 'time_10', title: '10-11 AM', description: 'Morning slot' },
-          { id: 'time_11', title: '11-12 PM', description: 'Late morning' },
-          { id: 'time_12', title: '12-01 PM', description: 'Afternoon slot' },
-          { id: 'time_1',  title: '01-02 PM', description: 'Afternoon slot' },
-        ]
-      }
+      { id: 'time1', title: '09-10 AM' },
+      { id: 'time2', title: '10-11 AM' },
+      { id: 'time3', title: '11-12 PM' },
+    ]
+  );
+  await sendButtons(from,
+    `More time slots:`,
+    [
+      { id: 'time4', title: '12-01 PM' },
     ]
   );
 }
 
 async function saveTime(from, session, time) {
-  const { name, service, branch } = session.data;
+  const { name, branch, type } = session.data;
   await setState(from, 'IDLE', {});
 
-  // Save to Supabase
   await saveLead({
     phone: from,
-    name,
+    name: name || 'Unknown',
     business_type: 'SALON',
-    service,
-    booking_date: time,
+    service: type || 'Saloon',
     address: branch,
+    booking_date: time,
     status: 'new',
-    raw_data: { name, service, branch, time, phone: from }
+    raw_data: { name, branch, time, type, phone: from }
   });
 
-  // Send confirmation
   await sendText(from,
     `✅ *Appointment Confirmed!*\n\n` +
     `📌 Name: ${name}\n` +
-    `💇 Service: ${service}\n` +
+    `💇 Saloon: ${type}\n` +
     `📍 Branch: ${branch}\n` +
     `⏰ Time: ${time}\n\n` +
     `Please arrive 15 minutes early.\n\n` +
     `Thank you for choosing Madina Saloon! 🙏`
   );
 
-  // Show menu again after 2 seconds
   setTimeout(async () => {
     await showWelcome(from);
   }, 2000);
