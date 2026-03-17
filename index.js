@@ -7,7 +7,7 @@ const app = express();
 app.use(express.json());
 
 const PHONE_NUMBER_ID = '1026663817198120';
-const TOKEN = 'EAAUiUpxuFY8BQZCZAfBfdXRet9ONZAvJIp1UEsyp6MD9JuPtb7c77J2zTiPhzjh1fasZAyurG7JUxTqiUNNUAuZC1uWCw8C438LvWVzUvRcR6bfZBbQJMZAcaVTKbcdiUrknvrlEPZAJs6ZAxpYsugRXhbixdbeNClVrrlHFydEqZCueo3lFk5F1mnQI2QFFpDeqyiNweTcZClISZBsNDmnpViJNfo4MKVbUZBjaaq9rQ4BG21gMftlIJnR7ofZBWjmdcoZBkZAZBmp1EZAqZC2btET7KNtubsq0cX6WqBKihdaMgZDZD';
+const TOKEN = process.env.WHATSAPP_TOKEN;
 const SUPABASE_URL = 'https://faadfckdtjkqeqfhtcgi.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhYWRmY2tkdGprcWVxZmh0Y2dpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0NjUzNDUsImV4cCI6MjA4OTA0MTM0NX0.LypDChCOPsF9W3C5WIM99Yfsz2Gj8_DZ9vVQehE03tk';
 const VERIFY_TOKEN = 'chatbot_demo';
