@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
+import "./App.css";
 
 const SUPABASE_URL = "https://faadfckdtjkqeqfhtcgi.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhYWRmY2tkdGprcWVxZmh0Y2dpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0NjUzNDUsImV4cCI6MjA4OTA0MTM0NX0.LypDChCOPsF9W3C5WIM99Yfsz2Gj8_DZ9vVQehE03tk";
@@ -92,23 +94,21 @@ export default function Dashboard() {
   return (
     <div style={{
       minHeight: "100vh",
-      background: "#0f0f11",
-      color: "#e8e6df",
-      fontFamily: "'DM Sans', 'Helvetica Neue', sans-serif",
+      background: "var(--color-surface-primary)",
+      color: "var(--color-text-primary)",
+      fontFamily: "var(--font-body)",
       display: "flex",
       flexDirection: "column",
     }}>
-      {/* Google Font */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
         * { box-sizing: border-box; }
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: var(--color-surface-tertiary); border-radius: 4px; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
-        .lead-row { transition: background 0.15s; cursor: pointer; animation: fadeIn 0.25s ease both; }
-        .lead-row:hover { background: #1a1a1f !important; }
+        .lead-row { transition: background 0.15s; cursor: pointer; }
+        .lead-row:hover { background: rgba(255, 255, 255, 0.03) !important; }
         .filter-btn { transition: all 0.15s; border: none; cursor: pointer; font-family: inherit; }
         .filter-btn:hover { opacity: 0.85; }
         .status-select { background: transparent; border: none; font-family: 'DM Mono', monospace; font-size: 11px; cursor: pointer; outline: none; }
@@ -117,106 +117,129 @@ export default function Dashboard() {
         .detail-panel { animation: fadeIn 0.2s ease; }
       `}</style>
 
-      {/* Header */}
-      <div style={{
-        borderBottom: "1px solid #222",
-        padding: "18px 28px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        background: "#0f0f11",
-        position: "sticky",
-        top: 0,
-        zIndex: 10,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <motion.div 
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        style={{
+          borderBottom: '1px solid var(--color-border)',
+          padding: '18px 28px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          background: 'rgba(15, 23, 42, 0.8)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          position: 'sticky',
+          top: 0,
+          zIndex: 10,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
             width: 32, height: 32, borderRadius: 8,
-            background: "#25D366",
-            display: "flex", alignItems: "center", justifyContent: "center",
+            background: 'linear-gradient(135deg, var(--color-brand), var(--color-accent))',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 16,
           }}>💬</div>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: "-0.02em" }}>WhatsApp CRM</div>
-            <div style={{ fontSize: 11, color: "#666", fontFamily: "'DM Mono', monospace" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.02em' }}>WhatsApp CRM</div>
+            <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontFamily: "'DM Mono', monospace" }}>
               {leads.length} total leads · refreshed {timeAgo(lastRefresh)}
             </div>
           </div>
         </div>
         <button className="refresh-btn" onClick={load} style={{
-          background: "#1a1a1f", border: "1px solid #2a2a2f",
-          borderRadius: 8, padding: "7px 14px",
-          color: "#e8e6df", fontSize: 12, cursor: "pointer",
-          fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6,
+          background: 'rgba(255, 255, 255, 0.05)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 8, padding: '7px 14px',
+          color: 'var(--color-text-primary)', fontSize: 12, cursor: 'pointer',
+          fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6,
         }}>
-          <span style={{ display: "inline-block", animation: loading ? "spin 0.8s linear infinite" : "none" }}>↻</span>
+          <span style={{ display: 'inline-block', animation: loading ? 'spin 0.8s linear infinite' : 'none' }}>↻</span>
           Refresh
         </button>
-      </div>
+      </motion.div>
 
-      {/* Stats row */}
-      <div style={{ display: "flex", gap: 1, borderBottom: "1px solid #1a1a1f", background: "#0a0a0c" }}>
-        {[{ key: "ALL", label: "All leads", emoji: "📊" }, ...Object.entries(BIZ_CONFIG).map(([k,v]) => ({ key: k, label: v.label, emoji: v.emoji }))].map(({ key, label, emoji }) => (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.1 }}
+        style={{ display: 'flex', gap: 1, borderBottom: '1px solid var(--color-border)', background: 'rgba(10, 10, 12, 0.5)' }}
+      >
+        {[{ key: 'ALL', label: 'All leads', emoji: '📊' }, ...Object.entries(BIZ_CONFIG).map(([k,v]) => ({ key: k, label: v.label, emoji: v.emoji }))].map(({ key, label, emoji }) => (
           <button key={key} className="filter-btn" onClick={() => setFilter(key)} style={{
-            flex: 1, padding: "14px 8px", textAlign: "center",
-            background: filter === key ? "#1a1a1f" : "transparent",
-            color: filter === key ? "#e8e6df" : "#555",
-            borderTop: filter === key ? "2px solid #25D366" : "2px solid transparent",
+            flex: 1, padding: '14px 8px', textAlign: 'center',
+            background: filter === key ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
+            color: filter === key ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+            borderTop: filter === key ? '2px solid var(--color-brand)' : '2px solid transparent',
             fontSize: 12,
           }}>
             <div style={{ fontSize: 18, marginBottom: 4 }}>{emoji}</div>
             <div style={{ fontWeight: 600, fontSize: 20, fontFamily: "'DM Mono', monospace" }}>
-              {key === "ALL" ? counts.ALL : (counts[key] || 0)}
+              {key === 'ALL' ? counts.ALL : (counts[key] || 0)}
             </div>
-            <div style={{ fontSize: 10, color: "#555", marginTop: 2 }}>{label}</div>
+            <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>{label}</div>
           </button>
         ))}
-      </div>
+      </motion.div>
 
-      {/* Content */}
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-
-        {/* Leads table */}
-        <div style={{ flex: 1, overflow: "auto", padding: "0 0 40px" }}>
-
-          {/* Status filter bar */}
-          <div style={{ display: "flex", gap: 8, padding: "14px 20px", borderBottom: "1px solid #1a1a1f" }}>
-            {["ALL", ...Object.keys(STATUS_CONFIG)].map(s => {
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <div style={{ flex: 1, overflow: 'auto', padding: '0 0 40px' }}>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.2 }}
+            style={{ display: 'flex', gap: 8, padding: '14px 20px', borderBottom: '1px solid var(--color-border)' }}
+          >
+            {['ALL', ...Object.keys(STATUS_CONFIG)].map(s => {
               const cfg = STATUS_CONFIG[s];
               const active = statusFilter === s;
               return (
                 <button key={s} className="filter-btn" onClick={() => setStatusFilter(s)} style={{
-                  padding: "4px 12px", borderRadius: 20,
-                  background: active ? (cfg?.bg || "#25D366") : "#1a1a1f",
-                  color: active ? (cfg?.text || "#0f0f11") : "#666",
+                  padding: '4px 12px', borderRadius: 20,
+                  background: active ? (cfg?.bg + '22') : 'rgba(255, 255, 255, 0.05)',
+                  color: active ? (cfg?.text || 'var(--color-text-primary)') : 'var(--color-text-muted)',
                   fontSize: 11, fontWeight: 500,
                 }}>
-                  {s === "ALL" ? "All statuses" : cfg.label}
+                  {s === 'ALL' ? 'All statuses' : cfg.label}
                 </button>
               );
             })}
-          </div>
+          </motion.div>
 
           {loading ? (
-            <div style={{ padding: 40, textAlign: "center", color: "#444" }}>
-              <div style={{ fontSize: 24, animation: "spin 1s linear infinite", display: "inline-block" }}>↻</div>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.3 }}
+              style={{ padding: 40, textAlign: 'center', color: 'var(--color-text-muted)' }}
+            >
+              <div style={{ fontSize: 24, animation: 'spin 1s linear infinite', display: 'inline-block' }}>↻</div>
               <div style={{ marginTop: 8, fontSize: 12 }}>Loading leads...</div>
-            </div>
+            </motion.div>
           ) : filtered.length === 0 ? (
-            <div style={{ padding: 60, textAlign: "center", color: "#333" }}>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+              style={{ padding: 60, textAlign: 'center', color: 'var(--color-text-muted)' }}
+            >
               <div style={{ fontSize: 32 }}>📭</div>
               <div style={{ marginTop: 8, fontSize: 13 }}>No leads found</div>
-              <div style={{ fontSize: 11, color: "#2a2a2f", marginTop: 4 }}>Try a different filter</div>
-            </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>Try a different filter</div>
+            </motion.div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
-                <tr style={{ borderBottom: "1px solid #1a1a1f" }}>
-                  {["Business", "Name", "Phone", "Service / Intent", "Date", "Status", "Received"].map(h => (
+                <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                  {['Business', 'Name', 'Phone', 'Service / Intent', 'Date', 'Status', 'Received'].map(h => (
                     <th key={h} style={{
-                      padding: "10px 16px", textAlign: "left",
-                      fontSize: 10, fontWeight: 500, color: "#444",
-                      textTransform: "uppercase", letterSpacing: "0.08em",
+                      padding: '10px 16px', textAlign: 'left',
+                      fontSize: 10, fontWeight: 500, color: 'var(--color-text-muted)',
+                      textTransform: 'uppercase', letterSpacing: '0.08em',
                       fontFamily: "'DM Mono', monospace",
                     }}>{h}</th>
                   ))}
@@ -224,66 +247,69 @@ export default function Dashboard() {
               </thead>
               <tbody>
                 {filtered.map((lead, i) => {
-                  const biz = BIZ_CONFIG[lead.business_type] || { emoji: "❓", label: lead.business_type, bg: "#1a1a1f", text: "#888" };
+                  const biz = BIZ_CONFIG[lead.business_type] || { emoji: '❓', label: lead.business_type, bg: '#1a1a1f', text: '#888' };
                   const st = STATUS_CONFIG[lead.status] || STATUS_CONFIG.new;
                   const isSelected = selected?.id === lead.id;
                   return (
-                    <tr key={lead.id}
+                    <motion.tr
+                      key={lead.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3, delay: i * 0.03 }}
                       className="lead-row"
                       onClick={() => setSelected(isSelected ? null : lead)}
                       style={{
-                        borderBottom: "1px solid #141416",
-                        background: isSelected ? "#1a1a1f" : "transparent",
-                        animationDelay: `${i * 0.03}s`,
+                        borderBottom: '1px solid var(--color-border)',
+                        background: isSelected ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
                       }}
                     >
-                      <td style={{ padding: "12px 16px" }}>
+                      <td style={{ padding: '12px 16px' }}>
                         <span style={{
-                          display: "inline-flex", alignItems: "center", gap: 6,
-                          padding: "3px 10px", borderRadius: 6,
-                          background: biz.bg + "22", color: biz.text,
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          padding: '3px 10px', borderRadius: 6,
+                          background: biz.bg + '22', color: biz.text,
                           fontSize: 11, fontWeight: 500,
                         }}>
                           <span style={{ fontSize: 13 }}>{biz.emoji}</span>
                           {biz.label}
                         </span>
                       </td>
-                      <td style={{ padding: "12px 16px", fontSize: 13, fontWeight: 500 }}>
-                        {lead.name || <span style={{ color: "#333" }}>—</span>}
+                      <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 500 }}>
+                        {lead.name || <span style={{ color: 'var(--color-text-muted)' }}>—</span>}
                       </td>
-                      <td style={{ padding: "12px 16px", fontSize: 11, fontFamily: "'DM Mono', monospace", color: "#888" }}>
+                      <td style={{ padding: '12px 16px', fontSize: 11, fontFamily: "'DM Mono', monospace", color: 'var(--color-text-muted)' }}>
                         +{lead.phone}
                       </td>
-                      <td style={{ padding: "12px 16px", fontSize: 12, color: "#aaa" }}>
-                        {lead.service || lead.intent || "—"}
+                      <td style={{ padding: '12px 16px', fontSize: 12, color: 'var(--color-text-muted)' }}>
+                        {lead.service || lead.intent || '—'}
                       </td>
-                      <td style={{ padding: "12px 16px", fontSize: 11, fontFamily: "'DM Mono', monospace", color: "#666" }}>
-                        {lead.booking_date || "—"}
+                      <td style={{ padding: '12px 16px', fontSize: 11, fontFamily: "'DM Mono', monospace", color: 'var(--color-text-muted)' }}>
+                        {lead.booking_date || '—'}
                       </td>
-                      <td style={{ padding: "12px 16px" }} onClick={e => e.stopPropagation()}>
+                      <td style={{ padding: '12px 16px' }} onClick={e => e.stopPropagation()}>
                         <div style={{
-                          display: "inline-flex", alignItems: "center", gap: 5,
-                          padding: "3px 10px", borderRadius: 6,
-                          background: st.bg + "33",
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          padding: '3px 10px', borderRadius: 6,
+                          background: st.bg + '33',
                         }}>
-                          <div style={{ width: 6, height: 6, borderRadius: "50%", background: st.dot }} />
+                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: st.dot }} />
                           <select
                             className="status-select"
-                            value={lead.status || "new"}
+                            value={lead.status || 'new'}
                             style={{ color: st.text, opacity: updating === lead.id ? 0.5 : 1 }}
                             onChange={e => handleStatusChange(lead.id, e.target.value)}
                             disabled={updating === lead.id}
                           >
                             {Object.entries(STATUS_CONFIG).map(([k, v]) => (
-                              <option key={k} value={k} style={{ background: "#1a1a1f", color: "#e8e6df" }}>{v.label}</option>
+                              <option key={k} value={k} style={{ background: 'var(--color-surface-primary)', color: 'var(--color-text-primary)' }}>{v.label}</option>
                             ))}
                           </select>
                         </div>
                       </td>
-                      <td style={{ padding: "12px 16px", fontSize: 11, color: "#444", fontFamily: "'DM Mono', monospace" }}>
+                      <td style={{ padding: '12px 16px', fontSize: 11, color: 'var(--color-text-muted)', fontFamily: "'DM Mono', monospace" }}>
                         {timeAgo(lead.created_at)}
                       </td>
-                    </tr>
+                    </motion.tr>
                   );
                 })}
               </tbody>
@@ -291,81 +317,91 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Detail panel */}
         {selectedLead && (
-          <div className="detail-panel" style={{
-            width: 300, borderLeft: "1px solid #1a1a1f",
-            background: "#0a0a0c", padding: 20, overflow: "auto",
-            display: "flex", flexDirection: "column", gap: 16,
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>Lead details</div>
-              <button onClick={() => setSelected(null)} style={{
-                background: "none", border: "none", color: "#444",
-                cursor: "pointer", fontSize: 18, lineHeight: 1,
-              }}>×</button>
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            transition={{ duration: 0.2 }}
+            className="detail-panel"
+            style={{
+              width: 300, borderLeft: '1px solid var(--color-border)',
+              background: 'rgba(10, 10, 12, 0.5)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              padding: 20, overflow: 'auto',
+              display: 'flex', flexDirection: 'column', gap: 16,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontFamily: "'DM Mono', monospace", marginBottom: 4 }}>
+                Lead Details
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>{selectedLead.name || 'Unnamed Lead'}</div>
             </div>
 
-            {/* Business badge */}
-            {(() => {
-              const biz = BIZ_CONFIG[selectedLead.business_type] || { emoji: "❓", label: selectedLead.business_type, bg: "#1a1a1f", text: "#888" };
-              return (
-                <div style={{
-                  padding: "12px 16px", borderRadius: 10,
-                  background: biz.bg + "22", border: `1px solid ${biz.bg}55`,
-                  display: "flex", alignItems: "center", gap: 10,
-                }}>
-                  <span style={{ fontSize: 24 }}>{biz.emoji}</span>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: biz.text }}>{biz.label}</div>
-                    <div style={{ fontSize: 10, color: "#555", marginTop: 2 }}>
-                      {new Date(selectedLead.created_at).toLocaleString()}
-                    </div>
+            <div className="glass" style={{ padding: 16, borderRadius: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <div style={{ width: 24, height: 24, borderRadius: 6, background: 'rgba(37, 211, 102, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span style={{ fontSize: 12, color: '#25D366' }}>📞</span>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontFamily: "'DM Mono', monospace" }}>Phone</div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>+{selectedLead.phone}</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <div style={{ width: 24, height: 24, borderRadius: 6, background: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span style={{ fontSize: 12, color: 'var(--color-brand)' }}>🏢</span>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontFamily: "'DM Mono', monospace" }}>Business Type</div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>
+                    {BIZ_CONFIG[selectedLead.business_type]?.label || selectedLead.business_type}
                   </div>
                 </div>
-              );
-            })()}
-
-            {/* Fields */}
-            {[
-              { label: "Name",     value: selectedLead.name },
-              { label: "Phone",    value: `+${selectedLead.phone}` },
-              { label: "Service",  value: selectedLead.service },
-              { label: "Intent",   value: selectedLead.intent },
-              { label: "Date",     value: selectedLead.booking_date },
-              { label: "Guests",   value: selectedLead.guests },
-              { label: "Address",  value: selectedLead.address },
-              { label: "Budget",   value: selectedLead.budget },
-              { label: "Location", value: selectedLead.location },
-            ].filter(f => f.value).map(f => (
-              <div key={f.label}>
-                <div style={{ fontSize: 10, color: "#444", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'DM Mono', monospace", marginBottom: 4 }}>{f.label}</div>
-                <div style={{ fontSize: 13, color: "#ccc" }}>{f.value}</div>
               </div>
-            ))}
 
-            {/* Status changer */}
-            <div>
-              <div style={{ fontSize: 10, color: "#444", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'DM Mono', monospace", marginBottom: 8 }}>Status</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {Object.entries(STATUS_CONFIG).map(([k, v]) => (
-                  <button key={k} onClick={() => handleStatusChange(selectedLead.id, k)} style={{
-                    padding: "8px 12px", borderRadius: 8, border: "none",
-                    background: selectedLead.status === k ? v.bg + "55" : "#141416",
-                    color: selectedLead.status === k ? v.text : "#555",
-                    fontFamily: "inherit", fontSize: 12, cursor: "pointer",
-                    textAlign: "left", display: "flex", alignItems: "center", gap: 8,
-                    fontWeight: selectedLead.status === k ? 600 : 400,
-                    transition: "all 0.15s",
-                    outline: selectedLead.status === k ? `1px solid ${v.dot}55` : "none",
-                  }}>
-                    <div style={{ width: 7, height: 7, borderRadius: "50%", background: v.dot }} />
-                    {v.label}
-                  </button>
-                ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 24, height: 24, borderRadius: 6, background: 'rgba(20, 184, 166, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span style={{ fontSize: 12, color: 'var(--color-accent)' }}>📅</span>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontFamily: "'DM Mono', monospace" }}>Status</div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>
+                    {STATUS_CONFIG[selectedLead.status]?.label || selectedLead.status}
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+
+            {selectedLead.service || selectedLead.intent ? (
+              <div className="glass" style={{ padding: 16, borderRadius: 8 }}>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontFamily: "'DM Mono', monospace", marginBottom: 8 }}>
+                  Service / Intent
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
+                  {selectedLead.service || selectedLead.intent}
+                </div>
+              </div>
+            ) : null}
+
+            {selectedLead.booking_date ? (
+              <div className="glass" style={{ padding: 16, borderRadius: 8 }}>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontFamily: "'DM Mono', monospace", marginBottom: 8 }}>
+                  Booking Date
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
+                  {selectedLead.booking_date}
+                </div>
+              </div>
+            ) : null}
+
+            <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontFamily: "'DM Mono', monospace", textAlign: 'center' }}>
+              Received {timeAgo(selectedLead.created_at)}
+            </div>
+          </motion.div>
         )}
       </div>
     </div>
