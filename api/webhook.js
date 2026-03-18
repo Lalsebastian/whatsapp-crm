@@ -6,7 +6,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
   if (req.method === 'GET') {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
@@ -18,22 +18,24 @@ module.exports = async function handler(req, res) {
   }
   if (req.method === 'POST') {
     res.status(200).end();
-    try {
-      const value = req.body && req.body.entry && req.body.entry[0] && req.body.entry[0].changes && req.body.entry[0].changes[0] && req.body.entry[0].changes[0].value;
-      if (!value || !value.messages || !value.messages[0]) return;
-      const msg = value.messages[0];
-      const from = msg.from;
-      const session = await getSession(from);
-      if (msg.type === 'interactive') {
-        await handleButton(from, msg.interactive && msg.interactive.button_reply && msg.interactive.button_reply.id, session);
-      } else if (msg.type === 'text') {
-        await handleText(from, msg.text.body.trim(), session);
+    (async () => {
+      try {
+        const value = req.body && req.body.entry && req.body.entry[0] && req.body.entry[0].changes && req.body.entry[0].changes[0] && req.body.entry[0].changes[0].value;
+        if (!value || !value.messages || !value.messages[0]) return;
+        const msg = value.messages[0];
+        const from = msg.from;
+        const session = await getSession(from);
+        if (msg.type === 'interactive') {
+          await handleButton(from, msg.interactive && msg.interactive.button_reply && msg.interactive.button_reply.id, session);
+        } else if (msg.type === 'text') {
+          await handleText(from, msg.text.body.trim(), session);
+        }
+      } catch (err) {
+        console.error('Bot error:', err.message);
       }
-    } catch (err) {
-      console.error('Bot error:', err.message);
-    }
+    })();
   }
-};
+}
 
 async function getSession(phone) {
   const res = await axios.get(
@@ -100,182 +102,157 @@ async function handleButton(from, id, session) {
 }
 
 async function handleText(from, text, session) {
-  const lower = text.toLowerCase();
-  if (['hi','hello','hey','menu','start','hii'].includes(lower)) {
-    return sendMainMenu(from);
-  }
-  const state = session.state;
-  const data = session.data || {};
-
-  if (state === 'AWAIT_REST_NAME') {
-    await setState(from, 'AWAIT_REST_DATE', Object.assign({}, data, { name: text }));
-    return sendText(from, 'Great, ' + text + '! What date? (e.g. 15 March)');
-  }
-  if (state === 'AWAIT_REST_DATE') {
-    await setState(from, 'AWAIT_REST_GUESTS', Object.assign({}, data, { date: text }));
-    return sendText(from, 'How many guests?');
-  }
-  if (state === 'AWAIT_REST_GUESTS') {
-    await setState(from, 'IDLE', {});
-    await saveLead({ phone: from, name: data.name, business_type: 'RESTAURANT', service: 'Table Booking', booking_date: data.date, guests: text, status: 'new', raw_data: { name: data.name, date: data.date, guests: text } });
-    return sendText(from, 'Booking Confirmed!\n\nName: ' + data.name + '\nDate: ' + data.date + '\nGuests: ' + text + '\n\nWe will confirm shortly! Type menu to go back.');
-  }
-  if (state === 'AWAIT_HOME_NAME') {
-    await setState(from, 'AWAIT_HOME_ADDRESS', Object.assign({}, data, { name: text }));
-    return sendText(from, 'Thanks ' + text + '! Your address?');
-  }
-  if (state === 'AWAIT_HOME_ADDRESS') {
-    await setState(from, 'AWAIT_HOME_DATE', Object.assign({}, data, { address: text }));
-    return sendText(from, 'Preferred date and time?');
-  }
-  if (state === 'AWAIT_HOME_DATE') {
-    await setState(from, 'IDLE', {});
-    await saveLead({ phone: from, name: data.name, business_type: 'HOME_SERVICES', service: data.service, address: data.address, booking_date: text, status: 'new', raw_data: { name: data.name, address: data.address, date: text, service: data.service } });
-    return sendText(from, 'Service Booked!\n\nService: ' + data.service + '\nName: ' + data.name + '\nAddress: ' + data.address + '\nDate: ' + text + '\n\nOur team will call to confirm. Type menu to go back.');
-  }
-  if (state === 'AWAIT_SALON_NAME') {
-    await setState(from, 'AWAIT_SALON_DATE', Object.assign({}, data, { name: text }));
-    return sendText(from, 'What date and time works for you?');
-  }
-  if (state === 'AWAIT_SALON_DATE') {
-    await setState(from, 'IDLE', {});
-    await saveLead({ phone: from, name: data.name, business_type: 'SALON', service: data.service, booking_date: text, status: 'new', raw_data: { name: data.name, service: data.service, date: text } });
-    return sendText(from, 'Appointment Booked!\n\nService: ' + data.service + '\nName: ' + data.name + '\nDate: ' + text + '\n\nSee you soon! Type menu to go back.');
-  }
-  if (state === 'AWAIT_RE_NAME') {
-    await setState(from, 'AWAIT_RE_BUDGET', Object.assign({}, data, { name: text }));
-    return sendText(from, 'What is your budget? (e.g. 50 to 80 lakhs)');
-  }
-  if (state === 'AWAIT_RE_BUDGET') {
-    await setState(from, 'AWAIT_RE_LOCATION', Object.assign({}, data, { budget: text }));
-    return sendText(from, 'Preferred location?');
-  }
-  if (state === 'AWAIT_RE_LOCATION') {
-    await setState(from, 'IDLE', {});
-    await saveLead({ phone: from, name: data.name, business_type: 'REAL_ESTATE', intent: data.intent, budget: data.budget, location: text, status: 'new', raw_data: { name: data.name, intent: data.intent, budget: data.budget, location: text } });
-    return sendText(from, 'Lead Captured!\n\nIntent: ' + data.intent + '\nName: ' + data.name + '\nBudget: ' + data.budget + '\nLocation: ' + text + '\n\nOur agent will reach out shortly! Type menu to go back.');
-  }
+  const cmd = text.toLowerCase();
+  if (cmd.includes('restaurant')) return startRestaurant(from);
+  if (cmd.includes('salon')) return startSalon(from);
+  if (cmd.includes('real estate')) return startRealEstate(from);
+  if (cmd.includes('service') || cmd.includes('home')) return startHomeServices(from);
   return sendMainMenu(from);
 }
 
-async function sendMainMenu(from) {
-  await setState(from, 'IDLE', {});
-  await sendButtons(from,
-    'Welcome to our Demo Hub!\n\nSmart WhatsApp automation for businesses.\n\nChoose a demo:',
-    [{ id: 'RESTAURANT', title: 'Restaurant' }, { id: 'HOME_SERVICES', title: 'Home services' }]
-  );
-  await sendButtons(from, 'More options:',
-    [{ id: 'SALON', title: 'Salon and beauty' }, { id: 'REAL_ESTATE', title: 'Real estate' }]
-  );
-}
-
-async function startRestaurant(from) {
-  await sendButtons(from,
-    'Spice Garden Restaurant\n\nAuthentic Indian cuisine.\nRated 4.8 | MG Road, Kozhikode',
-    [{ id: 'REST_MENU', title: 'View menu' }, { id: 'REST_BOOK', title: 'Book a table' }, { id: 'REST_CONTACT', title: 'Contact us' }]
-  );
-}
-
-async function sendRestaurantMenu(from) {
-  await sendText(from, 'Our Menu\n\nStarters\nPaneer Tikka - 180\nChicken 65 - 220\n\nMains\nButter Chicken - 320\nDal Makhani - 240\nBiryani - 280 or 350\n\nDesserts\nGulab Jamun - 120\n\nType book to reserve a table.');
-}
-
-async function startRestaurantBooking(from) {
-  await setState(from, 'AWAIT_REST_NAME', {});
-  await sendText(from, 'Table Booking\n\nWhat is your name?');
-}
-
-async function sendRestaurantContact(from) {
-  await sendText(from, 'Contact Spice Garden\n\nPhone: +91 98765 43210\nAddress: MG Road, Kozhikode\nHours: 11am to 11pm daily');
-}
-
-async function startHomeServices(from) {
-  await sendButtons(from,
-    'QuickFix Home Services\n\nFast reliable repairs.\n500+ customers | Same-day service',
-    [{ id: 'HOME_PLUMBING', title: 'Plumbing' }, { id: 'HOME_ELECTRICAL', title: 'Electrical' }, { id: 'HOME_CLEANING', title: 'Cleaning' }]
-  );
-}
-
-async function sendServiceInfo(from, service, price, bookId) {
-  await sendButtons(from,
-    service + '\n\nPrice: ' + price + '\nResponse: Within 2 hours\nInsured and verified',
-    [{ id: bookId, title: 'Book now' }, { id: 'MAIN_MENU', title: 'Back to menu' }]
-  );
-}
-
-async function startHomeBooking(from, id) {
-  const map = { HOME_BOOK_PLUMBING: 'Plumbing', HOME_BOOK_ELECTRICAL: 'Electrical', HOME_BOOK_CLEANING: 'Cleaning' };
-  const service = map[id] || 'Service';
-  await setState(from, 'AWAIT_HOME_NAME', { service: service });
-  await sendText(from, 'Booking ' + service + '\n\nYour full name?');
-}
-
-async function startSalon(from) {
-  await sendButtons(from,
-    'Glamour Studio\n\nPremium beauty treatments.\nRated 4.9 | Calicut Beach Road',
-    [{ id: 'SALON_HAIRCUT', title: 'Haircut' }, { id: 'SALON_FACIAL', title: 'Facial' }, { id: 'SALON_NAILS', title: 'Nails' }]
-  );
-}
-
-async function sendSalonInfo(from, service, price, duration) {
-  await setState(from, 'IDLE', { service: service });
-  await sendButtons(from,
-    service + '\n\nPrice: ' + price + '\nDuration: ' + duration + '\nExpert stylists',
-    [{ id: 'SALON_BOOK', title: 'Book appointment' }, { id: 'MAIN_MENU', title: 'Back to menu' }]
-  );
-}
-
-async function startSalonBooking(from, service) {
-  await setState(from, 'AWAIT_SALON_NAME', { service: service || 'Service' });
-  await sendText(from, 'Booking ' + (service || 'appointment') + '\n\nYour name?');
-}
-
-async function startRealEstate(from) {
-  await sendButtons(from,
-    'DreamHome Realty\n\n500+ listings in Kerala.\nExpert agents ready to help',
-    [{ id: 'RE_BUY', title: 'Buy property' }, { id: 'RE_RENT', title: 'Rent property' }, { id: 'RE_SELL', title: 'Sell property' }]
-  );
-}
-
-async function startRealEstateLead(from, intent) {
-  await setState(from, 'IDLE', { intent: intent });
-  await sendButtons(from,
-    intent + ' Property\n\n200+ properties available.\n\nSchedule a viewing?',
-    [{ id: 'RE_YES', title: 'Yes schedule' }, { id: 'RE_NO', title: 'Not now' }]
-  );
-}
-
-async function askRealEstateDetails(from, session) {
-  const intent = (session && session.data && session.data.intent) || 'Buy';
-  await setState(from, 'AWAIT_RE_NAME', { intent: intent });
-  await sendText(from, 'Schedule a viewing\n\nYour name?');
-}
-
-async function sendButtons(to, bodyText, buttons) {
-  await axios.post(
-    'https://graph.facebook.com/v19.0/' + PHONE_NUMBER_ID + '/messages',
+async function sendText(from, body) {
+  return axios.post(
+    `https://graph.instagram.com/v18.0/${PHONE_NUMBER_ID}/messages`,
     {
       messaging_product: 'whatsapp',
-      to: to,
+      to: from,
+      type: 'text',
+      text: { body: body }
+    },
+    { headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' } }
+  );
+}
+
+async function sendButtons(from, body, buttons) {
+  return axios.post(
+    `https://graph.instagram.com/v18.0/${PHONE_NUMBER_ID}/messages`,
+    {
+      messaging_product: 'whatsapp',
+      to: from,
       type: 'interactive',
       interactive: {
         type: 'button',
-        body: { text: bodyText },
+        body: { text: body },
         action: {
-          buttons: buttons.map(function(b) {
-            return { type: 'reply', reply: { id: b.id, title: b.title.substring(0, 20) } };
-          })
+          buttons: buttons
         }
       }
     },
-    { headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' } }
+    { headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' } }
   );
 }
 
-async function sendText(to, text) {
-  await axios.post(
-    'https://graph.facebook.com/v19.0/' + PHONE_NUMBER_ID + '/messages',
-    { messaging_product: 'whatsapp', to: to, type: 'text', text: { body: text } },
-    { headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' } }
-  );
+async function sendMainMenu(from) {
+  await setState(from, 'MENU', {});
+  return sendButtons(from, '👋 Welcome to our WhatsApp CRM! Select a category:', [
+    { type: 'reply', reply: { id: 'RESTAURANT', title: '🍽️ Restaurants' } },
+    { type: 'reply', reply: { id: 'HOME_SERVICES', title: '🔧 Services' } },
+    { type: 'reply', reply: { id: 'SALON', title: '💅 Salon' } },
+    { type: 'reply', reply: { id: 'REAL_ESTATE', title: '🏠 Real Estate' } }
+  ]);
 }
+
+async function startRestaurant(from) {
+  await setState(from, 'RESTAURANT', {});
+  return sendButtons(from, '🍽️ Restaurant Services:', [
+    { type: 'reply', reply: { id: 'REST_MENU', title: '📋 View Menu' } },
+    { type: 'reply', reply: { id: 'REST_BOOK', title: '📅 Book Table' } },
+    { type: 'reply', reply: { id: 'REST_CONTACT', title: '📞 Contact Info' } },
+    { type: 'reply', reply: { id: 'MAIN_MENU', title: '↩️ Main Menu' } }
+  ]);
+}
+
+async function startHomeServices(from) {
+  await setState(from, 'HOME_SERVICES', {});
+  return sendButtons(from, '🔧 Home Services:', [
+    { type: 'reply', reply: { id: 'HOME_PLUMBING', title: '🚰 Plumbing' } },
+    { type: 'reply', reply: { id: 'HOME_ELECTRICAL', title: '⚡ Electrical' } },
+    { type: 'reply', reply: { id: 'HOME_CLEANING', title: '🧹 Cleaning' } },
+    { type: 'reply', reply: { id: 'MAIN_MENU', title: '↩️ Main Menu' } }
+  ]);
+}
+
+async function startSalon(from) {
+  await setState(from, 'SALON', {});
+  return sendButtons(from, '💅 Salon Services:', [
+    { type: 'reply', reply: { id: 'SALON_HAIRCUT', title: '✂️ Haircut' } },
+    { type: 'reply', reply: { id: 'SALON_FACIAL', title: '💆 Facial' } },
+    { type: 'reply', reply: { id: 'SALON_NAILS', title: '💅 Nails' } },
+    { type: 'reply', reply: { id: 'MAIN_MENU', title: '↩️ Main Menu' } }
+  ]);
+}
+
+async function startRealEstate(from) {
+  await setState(from, 'REAL_ESTATE', {});
+  return sendButtons(from, '🏠 Real Estate Services:', [
+    { type: 'reply', reply: { id: 'RE_BUY', title: '🛒 Buy' } },
+    { type: 'reply', reply: { id: 'RE_RENT', title: '🔑 Rent' } },
+    { type: 'reply', reply: { id: 'RE_SELL', title: '💰 Sell' } },
+    { type: 'reply', reply: { id: 'MAIN_MENU', title: '↩️ Main Menu' } }
+  ]);
+}
+
+async function sendRestaurantMenu(from) {
+  return sendText(from, '📋 Restaurant Menu:\n\n🥘 Appetizers: 50-150 AED\n🍝 Main Courses: 80-250 AED\n🍰 Desserts: 30-80 AED\n🥤 Beverages: 15-50 AED\n\nReply MAIN_MENU to go back');
+}
+
+async function sendRestaurantContact(from) {
+  return sendText(from, '📞 Restaurant Contact Info:\n\n📍 Location: Downtown Dubai\n☎️ Phone: +971-4-123-4567\n⏰ Hours: 11 AM - 11 PM Daily\n🌐 Website: www.restaurant.ae\n\nReply MAIN_MENU to go back');
+}
+
+async function startRestaurantBooking(from) {
+  await setState(from, 'RESTAURANT_BOOKING', { started: true });
+  return sendText(from, '📅 Restaurant Booking\n\nPlease reply with:\n- Number of guests\n- Preferred date (DD/MM/YYYY)\n- Preferred time (HH:MM)');
+}
+
+async function sendServiceInfo(from, service, price, bookAction) {
+  await setState(from, 'SERVICE_INFO', { service: service });
+  return sendButtons(from, `${service} Service:\n\n💰 Price Range: ${price} AED\n⏱️ Duration: 1-2 hours\n\nWould you like to book?`, [
+    { type: 'reply', reply: { id: bookAction, title: '✓ Book Now' } },
+    { type: 'reply', reply: { id: 'HOME_SERVICES', title: '↩️ Back' } }
+  ]);
+}
+
+async function startHomeBooking(from, service) {
+  const services = {
+    'HOME_BOOK_PLUMBING': 'Plumbing',
+    'HOME_BOOK_ELECTRICAL': 'Electrical',
+    'HOME_BOOK_CLEANING': 'Cleaning'
+  };
+  await setState(from, 'HOME_BOOKING', { service: services[service] });
+  return sendText(from, `📅 ${services[service]} Service Booking\n\nPlease reply with your preferred date and time (DD/MM/YYYY HH:MM)`);
+}
+
+async function sendSalonInfo(from, service, price, duration) {
+  await setState(from, 'SALON_INFO', { service: service });
+  return sendButtons(from, `${service}\n\n💰 Price: ${price} AED\n⏱️ Duration: ${duration}\n\nBook now?`, [
+    { type: 'reply', reply: { id: 'SALON_BOOK', title: '✓ Book' } },
+    { type: 'reply', reply: { id: 'SALON', title: '↩️ Back' } }
+  ]);
+}
+
+async function startSalonBooking(from, service) {
+  await setState(from, 'SALON_BOOKING', { service: service });
+  return sendText(from, `💅 Booking ${service}\n\nPlease reply with preferred date and time (DD/MM/YYYY HH:MM)`);
+}
+
+async function startRealEstateLead(from, type) {
+  await setState(from, 'REAL_ESTATE_LEAD', { type: type });
+  return sendButtons(from, `Are you looking to ${type.toLowerCase()}?`, [
+    { type: 'reply', reply: { id: 'RE_YES', title: '✓ Yes' } },
+    { type: 'reply', reply: { id: 'RE_NO', title: '✗ No' } }
+  ]);
+}
+
+async function askRealEstateDetails(from, session) {
+  await saveLead({
+    name: 'WhatsApp Lead',
+    phone: from,
+    business_type: 'Real Estate',
+    service_type: session.data.type,
+    created_at: new Date().toISOString()
+  });
+  return sendText(from, `✓ Thank you! We're interested in helping you ${session.data.type.toLowerCase()}.\n\nOur team will contact you shortly to discuss your requirements.\n\n🙏 Appreciate your interest!`);
+}
+
+module.exports = handler;
