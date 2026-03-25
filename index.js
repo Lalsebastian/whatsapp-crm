@@ -26,19 +26,26 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
   try {
+    console.log('[WEBHOOK] POST received:', JSON.stringify(req.body, null, 2));
     const value = req.body?.entry?.[0]?.changes?.[0]?.value;
-    if (!value?.messages?.[0]) return;
+    if (!value?.messages?.[0]) {
+      console.log('[WEBHOOK] No message in payload — ignoring (status update)');
+      return;
+    }
     const msg = value.messages[0];
     const from = msg.from;
+    console.log(`[MSG] From: ${from} | Type: ${msg.type} | ID: ${msg.id}`);
     const session = await getSession(from);
     if (msg.type === 'interactive') {
       const id = msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id;
+      console.log(`[BUTTON] From: ${from} | Button ID: ${id}`);
       await handleButton(from, id, session);
     } else if (msg.type === 'text') {
+      console.log(`[TEXT] From: ${from} | Text: "${msg.text.body.trim()}"`);
       await handleText(from, msg.text.body.trim(), session);
     }
   } catch (err) {
-    console.error('Error:', err.message);
+    console.error('Error:', err.message, err.stack);
   }
 });
 
