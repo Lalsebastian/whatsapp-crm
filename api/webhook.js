@@ -1,5 +1,20 @@
 const axios = require('axios');
 
+// Deduplication: track processed message IDs for 60 seconds
+const processedMessages = new Map();
+const DEDUP_WINDOW_MS = 60 * 1000;
+
+function isDuplicate(messageId) {
+  const now = Date.now();
+  // Purge expired entries
+  for (const [id, timestamp] of processedMessages) {
+    if (now - timestamp > DEDUP_WINDOW_MS) processedMessages.delete(id);
+  }
+  if (processedMessages.has(messageId)) return true;
+  processedMessages.set(messageId, now);
+  return false;
+}
+
 const PHONE_NUMBER_ID = '1026663817198120';
 const TOKEN = process.env.WHATSAPP_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -31,7 +46,11 @@ async function handler(req, res) {
         }
         const msg = value.messages[0];
         const from = msg.from;
-        console.log(`[MSG] From: ${from} | Type: ${msg.type}`);
+        if (isDuplicate(msg.id)) {
+          console.log(`[DEDUP] Duplicate message ignored — ID: ${msg.id}`);
+          return;
+        }
+        console.log(`[MSG] From: ${from} | Type: ${msg.type} | ID: ${msg.id}`);
         const session = await getSession(from);
         console.log(`[SESSION] Phone: ${from} | State: ${session.state} | Data: ${JSON.stringify(session.data)}`);
         if (msg.type === 'interactive') {

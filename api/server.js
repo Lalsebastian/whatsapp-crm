@@ -57,7 +57,7 @@ app.listen(PORT, () => {
   console.log(`Webhook endpoint: http://localhost:${PORT}/webhook`);
 });
 
-// Keep-alive: ping self every 10 minutes to prevent Render free tier spin-down
+// Keep-alive: ping self every 4 minutes to prevent Render free tier spin-down
 const SELF_URL = 'https://whatsapp-bot-95ry.onrender.com/health';
 setInterval(async () => {
   try {
@@ -66,4 +66,4 @@ setInterval(async () => {
   } catch (err) {
     console.error(`[KEEP-ALIVE] Ping failed — ${err.message}`);
   }
-}, 10 * 60 * 1000);
+}, 4 * 60 * 1000);
