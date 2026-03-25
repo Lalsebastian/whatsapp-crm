@@ -36,6 +36,14 @@ const NAV_ITEMS = [
   { icon: "❓", label: "Help" },
 ];
 
+async function fetchMessages() {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/messages?select=*&order=created_at.desc&limit=50`,
+    { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+  );
+  return res.json();
+}
+
 async function fetchLeads() {
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/leads?select=*&order=created_at.desc`,
@@ -75,6 +83,8 @@ export default function Dashboard() {
   const [selected, setSelected]       = useState(null);
   const [updating, setUpdating]       = useState(null);
   const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [messages, setMessages]       = useState([]);
+  const [activeTab, setActiveTab]     = useState("leads");
   const [theme, setTheme]             = useState(
     () => localStorage.getItem("crm-theme") || "light"
   );
@@ -93,7 +103,18 @@ export default function Dashboard() {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  const loadMessages = async () => {
+    const data = await fetchMessages();
+    if (Array.isArray(data)) setMessages(data);
+  };
+
+  useEffect(() => { load(); loadMessages(); }, []);
+
+  // auto-refresh messages every 5 seconds
+  useEffect(() => {
+    const interval = setInterval(loadMessages, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const statCounts = {
     ALL:       leads.length,
@@ -189,17 +210,26 @@ export default function Dashboard() {
           {/* Page header */}
           <div className="page-header">
             <div>
-              <h1 className="page-title">Leads Dashboard</h1>
-              <p className="page-subtitle">Track, manage and follow up with all your WhatsApp leads.</p>
+              <h1 className="page-title">{activeTab === "leads" ? "Leads Dashboard" : "Live Messages"}</h1>
+              <p className="page-subtitle">{activeTab === "leads" ? "Track, manage and follow up with all your WhatsApp leads." : "All incoming WhatsApp messages in real-time."}</p>
             </div>
             <div className="page-actions">
-              <button className="btn" onClick={load} disabled={loading}>
-                <span className={loading ? "spin" : ""}>↻</span>
-                {loading ? "Refreshing…" : "Refresh"}
-              </button>
-              <button className="btn btn-primary">
-                + Export
-              </button>
+              <div className="tab-switcher">
+                <button className={`tab-btn ${activeTab === "leads" ? "active" : ""}`} onClick={() => setActiveTab("leads")}>Leads</button>
+                <button className={`tab-btn ${activeTab === "messages" ? "active" : ""}`} onClick={() => setActiveTab("messages")}>
+                  Live Messages
+                  {messages.length > 0 && <span className="nav-badge" style={{ marginLeft: 6 }}>{messages.length}</span>}
+                </button>
+              </div>
+              {activeTab === "leads" && (
+                <>
+                  <button className="btn" onClick={load} disabled={loading}>
+                    <span className={loading ? "spin" : ""}>↻</span>
+                    {loading ? "Refreshing…" : "Refresh"}
+                  </button>
+                  <button className="btn btn-primary">+ Export</button>
+                </>
+              )}
             </div>
           </div>
 
@@ -236,8 +266,48 @@ export default function Dashboard() {
             ))}
           </motion.div>
 
+          {/* Live Messages tab */}
+          {activeTab === "messages" && (
+            <motion.div
+              className="messages-feed"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25 }}
+            >
+              <div className="messages-feed-header">
+                <span>📨 Incoming Messages</span>
+                <span className="messages-live-dot">● Live</span>
+              </div>
+              {messages.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-icon">💬</div>
+                  <div className="empty-title">No messages yet</div>
+                  <div className="empty-sub">Messages will appear here as people chat with your bot</div>
+                </div>
+              ) : (
+                <div className="messages-list">
+                  {messages.map((m, i) => (
+                    <div key={m.id ?? i} className="message-row">
+                      <div className="message-avatar">{m.phone?.slice(-2)}</div>
+                      <div className="message-body">
+                        <div className="message-top">
+                          <span className="message-phone">+{m.phone}</span>
+                          <span className={`message-type-badge ${m.type === "button" ? "badge-button" : "badge-text"}`}>
+                            {m.type === "button" ? "🔘 Button" : "💬 Text"}
+                          </span>
+                        </div>
+                        <div className="message-content">{m.content}</div>
+                        <div className="message-time">{timeAgo(m.created_at)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+
           {/* Table card */}
-          <motion.div
+          {activeTab === "leads" && <motion.div
             className="main-split"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -426,7 +496,7 @@ export default function Dashboard() {
                 </motion.aside>
               )}
             </AnimatePresence>
-          </motion.div>
+          </motion.div>}
         </div>
       </div>
     </div>

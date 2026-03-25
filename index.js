@@ -39,10 +39,13 @@ app.post('/webhook', async (req, res) => {
     if (msg.type === 'interactive') {
       const id = msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id;
       console.log(`[BUTTON] From: ${from} | Button ID: ${id}`);
+      await saveMessage(from, 'button', id);
       await handleButton(from, id, session);
     } else if (msg.type === 'text') {
-      console.log(`[TEXT] From: ${from} | Text: "${msg.text.body.trim()}"`);
-      await handleText(from, msg.text.body.trim(), session);
+      const text = msg.text.body.trim();
+      console.log(`[TEXT] From: ${from} | Text: "${text}"`);
+      await saveMessage(from, 'text', text);
+      await handleText(from, text, session);
     }
   } catch (err) {
     console.error('Error:', err.message, err.stack);
@@ -78,6 +81,25 @@ async function setState(phone, state, data = {}) {
     );
   } catch (e) {
     console.error('setState error:', e.message);
+  }
+}
+
+async function saveMessage(phone, type, content) {
+  try {
+    await axios.post(
+      `${SUPABASE_URL}/rest/v1/messages`,
+      { phone, type, content, created_at: new Date().toISOString() },
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        }
+      }
+    );
+  } catch (e) {
+    console.error('saveMessage error:', e.message);
   }
 }
 
