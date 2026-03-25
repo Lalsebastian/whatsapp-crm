@@ -11,27 +11,42 @@ async function handler(req, res) {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
+    console.log(`[WEBHOOK] Verification request — mode: ${mode}, token_match: ${token === VERIFY_TOKEN}`);
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      console.log('[WEBHOOK] Verification successful');
       return res.status(200).send(challenge);
     }
+    console.warn('[WEBHOOK] Verification FAILED — token mismatch or wrong mode');
     return res.status(403).end();
   }
   if (req.method === 'POST') {
     res.status(200).end();
     (async () => {
       try {
+        console.log('[WEBHOOK] Incoming POST body:', JSON.stringify(req.body, null, 2));
         const value = req.body && req.body.entry && req.body.entry[0] && req.body.entry[0].changes && req.body.entry[0].changes[0] && req.body.entry[0].changes[0].value;
-        if (!value || !value.messages || !value.messages[0]) return;
+        if (!value || !value.messages || !value.messages[0]) {
+          console.log('[WEBHOOK] No message in payload — ignoring (could be status update)');
+          return;
+        }
         const msg = value.messages[0];
         const from = msg.from;
+        console.log(`[MSG] From: ${from} | Type: ${msg.type}`);
         const session = await getSession(from);
+        console.log(`[SESSION] Phone: ${from} | State: ${session.state} | Data: ${JSON.stringify(session.data)}`);
         if (msg.type === 'interactive') {
-          await handleButton(from, msg.interactive && msg.interactive.button_reply && msg.interactive.button_reply.id, session);
+          const buttonId = msg.interactive && msg.interactive.button_reply && msg.interactive.button_reply.id;
+          console.log(`[BUTTON] From: ${from} | Button ID: ${buttonId}`);
+          await handleButton(from, buttonId, session);
         } else if (msg.type === 'text') {
-          await handleText(from, msg.text.body.trim(), session);
+          const text = msg.text.body.trim();
+          console.log(`[TEXT] From: ${from} | Text: "${text}"`);
+          await handleText(from, text, session);
+        } else {
+          console.log(`[MSG] Unsupported message type: ${msg.type} — ignoring`);
         }
       } catch (err) {
-        console.error('Bot error:', err.message);
+        console.error('[BOT ERROR]', err.message, err.stack);
       }
     })();
   }
@@ -42,12 +57,17 @@ async function getSession(phone) {
     SUPABASE_URL + '/rest/v1/sessions?phone=eq.' + phone + '&select=*',
     { headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY } }
   );
-  if (res.data && res.data.length > 0) return res.data[0];
+  if (res.data && res.data.length > 0) {
+    console.log(`[SESSION] Loaded existing session for ${phone}: state=${res.data[0].state}`);
+    return res.data[0];
+  }
+  console.log(`[SESSION] No session found for ${phone} — starting fresh (IDLE)`);
   return { phone: phone, state: 'IDLE', data: {} };
 }
 
 async function setState(phone, state, data) {
   if (!data) data = {};
+  console.log(`[STATE] ${phone} → ${state} | data: ${JSON.stringify(data)}`);
   await axios.post(
     SUPABASE_URL + '/rest/v1/sessions',
     { phone: phone, state: state, data: data, updated_at: new Date().toISOString() },
@@ -63,6 +83,7 @@ async function setState(phone, state, data) {
 }
 
 async function saveLead(leadData) {
+  console.log(`[LEAD] Saving lead: ${JSON.stringify(leadData)}`);
   await axios.post(
     SUPABASE_URL + '/rest/v1/leads',
     leadData,
@@ -111,6 +132,7 @@ async function handleText(from, text, session) {
 }
 
 async function sendText(from, body) {
+  console.log(`[SEND TEXT] To: ${from} | Message: "${body.substring(0, 80)}${body.length > 80 ? '...' : ''}"`);
   return axios.post(
     `https://graph.instagram.com/v18.0/${PHONE_NUMBER_ID}/messages`,
     {
@@ -124,6 +146,7 @@ async function sendText(from, body) {
 }
 
 async function sendButtons(from, body, buttons) {
+  console.log(`[SEND BUTTONS] To: ${from} | Buttons: [${buttons.map(b => b.reply.id).join(', ')}]`);
   return axios.post(
     `https://graph.instagram.com/v18.0/${PHONE_NUMBER_ID}/messages`,
     {

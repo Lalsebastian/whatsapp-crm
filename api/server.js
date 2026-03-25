@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
@@ -12,6 +13,12 @@ app.use(express.urlencoded({ extended: true }));
 
 // Import the webhook handler
 const webhookHandler = require('./webhook');
+
+// Request logger
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
 
 // WhatsApp webhook endpoint
 app.all('/webhook', webhookHandler);
@@ -49,3 +56,14 @@ app.listen(PORT, () => {
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`Webhook endpoint: http://localhost:${PORT}/webhook`);
 });
+
+// Keep-alive: ping self every 10 minutes to prevent Render free tier spin-down
+const SELF_URL = 'https://whatsapp-bot-95ry.onrender.com/health';
+setInterval(async () => {
+  try {
+    await axios.get(SELF_URL);
+    console.log(`[KEEP-ALIVE] Ping successful — ${new Date().toISOString()}`);
+  } catch (err) {
+    console.error(`[KEEP-ALIVE] Ping failed — ${err.message}`);
+  }
+}, 10 * 60 * 1000);
