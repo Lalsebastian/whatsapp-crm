@@ -85,6 +85,7 @@ export default function Dashboard() {
   const [lastRefresh, setLastRefresh] = useState(new Date());
   const [messages, setMessages]       = useState([]);
   const [activeTab, setActiveTab]     = useState("leads");
+  const [selectedPhone, setSelectedPhone] = useState(null);
   const [theme, setTheme]             = useState(
     () => localStorage.getItem("crm-theme") || "light"
   );
@@ -267,44 +268,90 @@ export default function Dashboard() {
           </motion.div>
 
           {/* Live Messages tab */}
-          {activeTab === "messages" && (
-            <motion.div
-              className="messages-feed"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25 }}
-            >
-              <div className="messages-feed-header">
-                <span>📨 Incoming Messages</span>
-                <span className="messages-live-dot">● Live</span>
-              </div>
-              {messages.length === 0 ? (
-                <div className="empty-state">
-                  <div className="empty-icon">💬</div>
-                  <div className="empty-title">No messages yet</div>
-                  <div className="empty-sub">Messages will appear here as people chat with your bot</div>
-                </div>
-              ) : (
-                <div className="messages-list">
-                  {messages.map((m, i) => (
-                    <div key={m.id ?? i} className="message-row">
-                      <div className="message-avatar">{m.phone?.slice(-2)}</div>
-                      <div className="message-body">
-                        <div className="message-top">
-                          <span className="message-phone">+{m.phone}</span>
-                          <span className={`message-type-badge ${m.type === "button" ? "badge-button" : "badge-text"}`}>
-                            {m.type === "button" ? "🔘 Button" : "💬 Text"}
-                          </span>
+          {activeTab === "messages" && (() => {
+            // group messages by phone, sorted by latest first
+            const sessionMap = {};
+            [...messages].reverse().forEach(m => {
+              if (!sessionMap[m.phone]) sessionMap[m.phone] = [];
+              sessionMap[m.phone].push(m);
+            });
+            const sessions = Object.entries(sessionMap).sort(
+              ([, a], [, b]) => new Date(b[b.length-1].created_at) - new Date(a[a.length-1].created_at)
+            );
+            const activeSession = selectedPhone ? sessionMap[selectedPhone] : null;
+
+            return (
+              <motion.div
+                className="inbox-shell"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25 }}
+              >
+                {/* Session list */}
+                <div className="inbox-sidebar">
+                  <div className="inbox-sidebar-header">
+                    <span>Sessions</span>
+                    <span className="messages-live-dot">● Live</span>
+                  </div>
+                  {sessions.length === 0 ? (
+                    <div className="inbox-empty">No messages yet</div>
+                  ) : sessions.map(([phone, msgs]) => {
+                    const last = msgs[msgs.length - 1];
+                    const isActive = selectedPhone === phone;
+                    return (
+                      <div
+                        key={phone}
+                        className={`session-row ${isActive ? "active" : ""}`}
+                        onClick={() => setSelectedPhone(isActive ? null : phone)}
+                      >
+                        <div className="session-avatar">{phone.slice(-2)}</div>
+                        <div className="session-info">
+                          <div className="session-phone">+{phone}</div>
+                          <div className="session-preview">{last.content}</div>
                         </div>
-                        <div className="message-content">{m.content}</div>
-                        <div className="message-time">{timeAgo(m.created_at)}</div>
+                        <div className="session-meta">
+                          <div className="session-time">{timeAgo(last.created_at)}</div>
+                          <div className="session-count">{msgs.length}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
-              )}
-            </motion.div>
-          )}
+
+                {/* Message thread */}
+                <div className="inbox-thread">
+                  {!activeSession ? (
+                    <div className="inbox-thread-empty">
+                      <div className="empty-icon">💬</div>
+                      <div className="empty-title">Select a session</div>
+                      <div className="empty-sub">Click a contact on the left to view their messages</div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="inbox-thread-header">
+                        <div className="session-avatar">{selectedPhone.slice(-2)}</div>
+                        <div>
+                          <div className="inbox-thread-phone">+{selectedPhone}</div>
+                          <div className="inbox-thread-sub">{activeSession.length} messages</div>
+                        </div>
+                      </div>
+                      <div className="inbox-thread-messages">
+                        {activeSession.map((m, i) => (
+                          <div key={m.id ?? i} className="thread-msg">
+                            <span className={`message-type-badge ${m.type === "button" ? "badge-button" : "badge-text"}`}>
+                              {m.type === "button" ? "🔘" : "💬"}
+                            </span>
+                            <span className="thread-msg-content">{m.content}</span>
+                            <span className="thread-msg-time">{timeAgo(m.created_at)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </motion.div>
+            );
+          })()}
 
           {/* Table card */}
           {activeTab === "leads" && <motion.div
