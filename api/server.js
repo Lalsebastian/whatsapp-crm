@@ -1,69 +1,63 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-require('dotenv').config();
+const env = require('./config/env');
+const logger = require('./utils/logger');
+
+const webhookRoute = require('./routes/webhook');
+const healthRoute = require('./routes/health');
+const chatTestRoute = require('./routes/chatTest');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public'));
 
-// Import the webhook handler
-const webhookHandler = require('./webhook');
-
-// Request logger
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  logger.log('HTTP', `${req.method} ${req.path}`);
   next();
 });
 
-// WhatsApp webhook endpoint
-app.all('/webhook', webhookHandler);
+app.use('/webhook', webhookRoute);
+app.use('/health', healthRoute);
+app.use('/api/chat/test', chatTestRoute);
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
-});
-
-// Root endpoint
 app.get('/', (req, res) => {
   res.json({
-    message: 'WhatsApp CRM API',
-    version: '1.0.0',
-    endpoints: {
-      webhook: '/webhook',
-      health: '/health'
-    }
+    message: 'Home Services WhatsApp Chatbot API',
+    endpoints: { webhook: '/webhook', health: '/health', chatTest: '/api/chat/test' },
   });
 });
 
-// Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
+  logger.error('HTTP', 'Unhandled error:', err.message, err.stack);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-app.listen(PORT, () => {
-  console.log(`WhatsApp CRM API running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
-  console.log(`Webhook endpoint: http://localhost:${PORT}/webhook`);
+app.listen(env.PORT, () => {
+  logger.log('SERVER', `Running on port ${env.PORT}`);
+  logger.log('SERVER', `Health check: http://localhost:${env.PORT}/health`);
+  logger.log('SERVER', `Webhook: http://localhost:${env.PORT}/webhook`);
+  logger.log('SERVER', `Test chat: http://localhost:${env.PORT}/api/chat/test`);
 });
 
-// Keep-alive: ping self every 4 minutes to prevent Render free tier spin-down
-const SELF_URL = 'https://whatsapp-bot-95ry.onrender.com/health';
-setInterval(async () => {
-  try {
-    await axios.get(SELF_URL);
-    console.log(`[KEEP-ALIVE] Ping successful — ${new Date().toISOString()}`);
-  } catch (err) {
-    console.error(`[KEEP-ALIVE] Ping failed — ${err.message}`);
-  }
-}, 4 * 60 * 1000);
+// Keep-alive: ping self every 4 minutes to prevent Render free-tier spin-down.
+// Render sets RENDER_EXTERNAL_URL automatically; falls back to the URL this
+// project has historically deployed to.
+const SELF_URL = process.env.RENDER_EXTERNAL_URL || 'https://whatsapp-bot-95ry.onrender.com';
+if (env.NODE_ENV === 'production') {
+  setInterval(async () => {
+    try {
+      await axios.get(`${SELF_URL}/health`);
+      logger.log('KEEP-ALIVE', 'Ping successful');
+    } catch (err) {
+      logger.error('KEEP-ALIVE', 'Ping failed:', err.message);
+    }
+  }, 4 * 60 * 1000);
+}

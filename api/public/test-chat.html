@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Chatbot Test Console</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; background: #0f1115; color: #e6e6e6; }
+  h1 { font-size: 1.2rem; }
+  #log { border: 1px solid #333; border-radius: 8px; padding: 1rem; height: 420px; overflow-y: auto; background: #16181d; margin-bottom: 1rem; }
+  .msg { margin-bottom: 0.75rem; }
+  .msg .who { font-size: 0.75rem; opacity: 0.6; }
+  .msg.user .body { color: #8ab4f8; }
+  .msg.bot .body { white-space: pre-wrap; }
+  .meta { font-size: 0.7rem; opacity: 0.5; margin-top: 2px; }
+  form { display: flex; gap: 0.5rem; }
+  input[type=text] { flex: 1; padding: 0.5rem; border-radius: 6px; border: 1px solid #444; background: #16181d; color: #eee; }
+  button { padding: 0.5rem 1rem; border-radius: 6px; border: none; background: #2563eb; color: white; cursor: pointer; }
+  label { font-size: 0.8rem; opacity: 0.7; }
+</style>
+</head>
+<body>
+<h1>Home Services Chatbot — Test Console</h1>
+<label>Phone (any string, used as the customer's identity)</label>
+<input id="phone" type="text" value="971500000000" style="width:100%;margin-bottom:1rem;padding:0.5rem;border-radius:6px;border:1px solid #444;background:#16181d;color:#eee;" />
+<div id="log"></div>
+<form id="form">
+  <input id="message" type="text" placeholder="Type a message, e.g. 'menu' or 'Nale AC service venam'" autocomplete="off" />
+  <button type="submit">Send</button>
+</form>
+
+<script>
+const log = document.getElementById('log');
+const form = document.getElementById('form');
+const messageInput = document.getElementById('message');
+const phoneInput = document.getElementById('phone');
+
+function addMessage(who, body, meta) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + who;
+  div.innerHTML = '<div class="who">' + (who === 'user' ? 'You' : 'Bot') + '</div>' +
+    '<div class="body"></div>' + (meta ? '<div class="meta"></div>' : '');
+  div.querySelector('.body').textContent = body;
+  if (meta) div.querySelector('.meta').textContent = meta;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = messageInput.value.trim();
+  const phone = phoneInput.value.trim();
+  if (!message || !phone) return;
+
+  addMessage('user', message);
+  messageInput.value = '';
+
+  try {
+    const res = await fetch('/api/chat/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, message }),
+    });
+    const data = await res.json();
+    addMessage('bot', data.reply || '(no reply)', 'intent=' + data.intent + ' flow=' + data.flow + ' step=' + data.step);
+  } catch (err) {
+    addMessage('bot', 'Request failed: ' + err.message);
+  }
+});
+</script>
+</body>
+</html>

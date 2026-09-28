@@ -7,14 +7,24 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: WHATSAPP_TOKEN
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
         sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
-      - key: VERIFY_TOKEN
+      - key: CLIENT_API_BASE_URL
         sync: false
+      - key: CLIENT_API_KEY
+        sync: false
+      - key: CRM_PROVIDER
+        value: supabase
 
   - type: static_site
     name: whatsapp-crm-frontend
