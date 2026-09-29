@@ -18,7 +18,8 @@ const unknownStreak = require('./unknownStreak');
 const testChannel = require('../whatsapp/testChannel');
 
 const crm = getCrmAdapter();
-const MENU_KEYWORDS = ['menu', 'main menu', 'cancel', 'start over', 'reset'];
+const MENU_KEYWORDS = ['menu', 'main menu', 'cancel', 'start', 'restart', 'start over', 'reset'];
+const SUPPORT_KEYWORDS = ['support', 'human', 'agent', 'talk to support', 'human agent'];
 const GREETING_KEYWORDS = ['hi', 'hello', 'hey', 'hii', 'start', 'menu'];
 
 async function logMessage(phone, direction, type, content, extra = {}) {
@@ -76,6 +77,16 @@ async function route(session, customer, inbound) {
   if (inbound.buttonId === 'MAIN_MENU' || MENU_KEYWORDS.includes(lowerText)) {
     await entryPoints.MAIN_MENU(session, customer, inbound);
     return { reply: 'main_menu', intent: null, flow: 'main_menu', step: null };
+  }
+
+  if (inbound.buttonId === 'TALK_TO_SUPPORT' || SUPPORT_KEYWORDS.includes(lowerText)) {
+    await entryPoints.TALK_TO_SUPPORT(session, customer, inbound);
+    return { reply: 'escalated', intent: 'HUMAN_AGENT', flow: null, step: null };
+  }
+
+  if (session.currentFlow && session.currentStep && GREETING_KEYWORDS.includes(lowerText)) {
+    await whatsapp.sendText(session.phone, 'Hello. We can continue from where we left off, or you can type "menu" to start again.');
+    return { reply: 'active_flow_greeting', flow: session.currentFlow, step: session.currentStep };
   }
 
   // A structured flow already in progress wins over everything else.
@@ -149,6 +160,7 @@ async function routeFreeText(session, customer, inbound) {
   });
 
   if (trigger.escalate) {
+    let escalationCreated = false;
     try {
       await triggerEscalation({
         crm,
@@ -157,15 +169,23 @@ async function routeFreeText(session, customer, inbound) {
         reason: trigger.reason,
         summary: `Last message: "${inbound.text}" (intent=${intentResult.intent}, confidence=${intentResult.confidence})`,
       });
+      escalationCreated = true;
     } catch (err) {
       logger.error('ROUTER', 'triggerEscalation failed:', err.message);
     }
     await sessionStore.clearFlow(session.phone);
-    await whatsapp.sendText(
-      session.phone,
-      "🙋 You're being connected to our support team. Someone will reply here shortly."
-    );
-    return { reply: 'escalated', intent: intentResult.intent, flow: null, step: null, escalationReason: trigger.reason };
+    const message = escalationCreated
+      ? "I've shared your message and the available conversation details with our support team, so you won't need to explain everything again. A team member will reply here as soon as possible."
+      : 'I\'m sorry, I could not connect you with our support team right now. Please try again shortly.';
+    await whatsapp.sendText(session.phone, message);
+    return {
+      reply: escalationCreated ? 'escalated' : 'escalation_failed',
+      intent: intentResult.intent,
+      confidence: intentResult.confidence,
+      flow: null,
+      step: null,
+      escalationReason: trigger.reason,
+    };
   }
 
   const entryKey = intentToEntryPoint[intentResult.intent];
@@ -175,8 +195,15 @@ async function routeFreeText(session, customer, inbound) {
     return { reply: 'unknown_fallback_menu', intent: intentResult.intent, flow: 'main_menu', step: null, debugReason: intentResult.debugReason };
   }
 
-  await entryPoints[entryKey](session, customer, inbound);
-  return { reply: 'handled', intent: intentResult.intent, flow: entryKey, step: null };
+  await entryPoints[entryKey](session, customer, { ...inbound, ai: intentResult });
+  return {
+    reply: 'handled',
+    intent: intentResult.intent,
+    confidence: intentResult.confidence,
+    aiMatch: intentResult.service || null,
+    flow: entryKey,
+    step: null,
+  };
 }
 
 async function routeVoiceNote(session, customer, inbound) {

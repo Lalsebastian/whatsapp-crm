@@ -72,4 +72,16 @@ describe('human takeover', () => {
     // "menu" is a greeting/menu keyword — should trigger the main menu, which sends something.
     expect(whatsapp.sendListMessage).toHaveBeenCalled();
   });
+
+  it('handles a greeting during an active flow without treating it as flow input', async () => {
+    sessionStore.getOrCreateSession.mockResolvedValue({
+      phone: '971500', currentFlow: 'booking', currentStep: 'select_service', context: {}, humanTakeover: false, customerId: 'cust1',
+    });
+
+    const result = await handleInboundMessage({ from: '971500', type: 'text', text: 'hello', waMessageId: 'wamid-3' });
+
+    expect(result.reply).toBe('active_flow_greeting');
+    expect(whatsapp.sendText).toHaveBeenCalledWith('971500', expect.stringContaining('continue from where we left off'));
+    expect(whatsapp.sendListMessage).not.toHaveBeenCalled();
+  });
 });

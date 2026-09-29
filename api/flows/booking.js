@@ -1,93 +1,213 @@
-// Booking flow: select_service -> select_property -> select_date -> select_slot -> confirm.
-// The AI layer never touches any of this — it only ever gets us to `startBooking`;
-// every field below is collected from the customer and validated here before the
-// single crm.createBooking() call at the very end.
+// Hybrid booking flow. Buttons/lists remain the fastest path, while text and
+// transcribed voice notes can prefill fields. AI only interprets input; every
+// service, property, date and slot is validated against CRM data before the
+// backend performs any booking action.
 const whatsapp = require('../whatsapp/client');
 const sessionStore = require('../session/sessionStore');
 const logger = require('../utils/logger');
-const { parseDateInput } = require('./dateUtils');
+const { parseDateInput, formatDateForCustomer, formatSlotForCustomer } = require('./dateUtils');
+const { matchServiceToCatalog } = require('../ai/intentService');
+const AI_CONFIDENCE = require('../ai/confidence');
 const { getCrmAdapter } = require('../crm');
 
 const crm = getCrmAdapter();
 const FLOW = 'booking';
 
-async function startBooking(session, customer) {
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function matchServiceByText(text, services) {
+  const lower = String(text || '').trim().toLowerCase();
+  if (!lower) return null;
+  const byCategory = services.filter((service) => service.category &&
+    new RegExp(`\\b${escapeRegex(service.category)}\\b`, 'i').test(lower));
+  if (byCategory.length === 1) return byCategory[0];
+  const byName = services.filter((service) => {
+    const name = String(service.name || '').toLowerCase();
+    return name && (lower.includes(name) || name.includes(lower));
+  });
+  return byName.length === 1 ? byName[0] : null;
+}
+
+function propertyDisplay(property) {
+  const place = [property.area, property.city].filter(Boolean).join(', ');
+  return property.label ? `${property.label}${place ? ` — ${place}` : ''}` : property.addressLine;
+}
+
+function matchSavedProperty(locationHint, properties) {
+  const hint = String(locationHint || '').trim().toLowerCase();
+  if (!hint) return null;
+  const matches = properties.filter((property) =>
+    [property.label, property.addressLine, property.area, property.city]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(hint) || hint.includes(String(value).toLowerCase()))
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function selectPreferredSlot(preference, slots) {
+  const wanted = String(preference || '').trim().toLowerCase();
+  if (!wanted) return null;
+  const exact = slots.filter((slot) =>
+    String(slot).toLowerCase() === wanted || formatSlotForCustomer(slot).toLowerCase() === wanted
+  );
+  if (exact.length === 1) return exact[0];
+  const periodMatches = slots.filter((slot) => {
+    const hourMatch = String(slot).match(/^(\d{1,2}):/);
+    if (!hourMatch) return false;
+    const hour = Number(hourMatch[1]);
+    if (/morning|ravile|raavile|subah/.test(wanted)) return hour < 12;
+    if (/afternoon|uchakku|dopahar/.test(wanted)) return hour >= 12 && hour < 17;
+    if (/evening|vaikunneram|shaam|night/.test(wanted)) return hour >= 17;
+    return false;
+  });
+  return periodMatches.length === 1 ? periodMatches[0] : null;
+}
+
+function aiPrefill(input = {}) {
+  const ai = input.ai || {};
+  return {
+    issue: ai.issue || null,
+    locationHint: ai.locationHint || null,
+    date: parseDateInput(ai.preferredDate),
+    preferredTime: ai.preferredTime || null,
+    cart: [],
+  };
+}
+
+async function promptServiceList(session, services, context = {}, intro) {
+  await whatsapp.sendListMessage(
+    session.phone,
+    intro || 'Certainly. What service can I help you with? You can select one below or describe the problem in your own words.',
+    'Choose service',
+    [{ title: 'Available Services', rows: services.slice(0, 10).map((service) => ({
+      id: `SVC_${service.id}`,
+      title: service.name,
+      description: service.basePrice ? `From AED ${service.basePrice}` : (service.description || ''),
+    })) }]
+  );
+  await sessionStore.setFlow(session.phone, FLOW, 'select_service', context);
+}
+
+async function promptServiceConfirmation(session, service, context) {
+  await whatsapp.sendButtons(session.phone, `It sounds like you need ${service.name}. Is that correct?`, [
+    { id: 'CONFIRM_INFERRED_SERVICE', title: `Yes, ${service.name}` },
+    { id: 'CHOOSE_ANOTHER_SERVICE', title: 'Choose Another' },
+  ]);
+  await sessionStore.setFlow(session.phone, FLOW, 'confirm_service', { ...context, inferredServiceId: service.id });
+}
+
+async function resolveSemanticService(session, text, services) {
+  const result = await matchServiceToCatalog(text, services, { preferredLanguage: session.preferredLanguage });
+  if (!result.serviceId || result.confidence < AI_CONFIDENCE.MEDIUM) return null;
+  const service = services.find((item) => String(item.id) === String(result.serviceId));
+  return service ? { service, confidence: result.confidence } : null;
+}
+
+async function startBooking(session, customer, input = {}) {
+  logger.log('BOOKING_STARTED', { phone: session.phone });
   const services = await crm.getServices();
   if (!services || services.length === 0) {
     await whatsapp.sendText(session.phone, "I'm sorry, our services are not available for booking right now. Please try again shortly, or type \"support\" to speak with our team.");
     return;
   }
-
-  await whatsapp.sendListMessage(
-    session.phone,
-    'Certainly. Which service would you like to book?',
-    'Choose service',
-    [
-      {
-        title: 'Services',
-        rows: services.slice(0, 10).map((s) => ({
-          id: `SVC_${s.id}`,
-          title: s.name,
-          description: s.basePrice ? `From AED ${s.basePrice}` : (s.description || ''),
-        })),
-      },
-    ]
-  );
-  await sessionStore.setFlow(session.phone, FLOW, 'select_service', {});
+  const context = aiPrefill(input);
+  if (input.ai) {
+    const deterministic = matchServiceByText(input.ai.service, services);
+    const semantic = deterministic ? null : await resolveSemanticService(session, input.text, services);
+    const service = deterministic || (semantic && semantic.service);
+    if (service) return promptServiceConfirmation(session, service, context);
+    logger.log('AI_FALLBACK_USED', { flow: FLOW, reason: 'service_not_resolved' });
+  }
+  await promptServiceList(session, services, context);
 }
 
-// Being inside this step shouldn't mean only button taps work — a customer
-// typing "ac service" or "enik ac service venam" instead of tapping the list
-// should still land on the right service. Whole-word category match first
-// (reliable for short codes like "ac"), then a same-language name substring.
-async function matchServiceByText(text, services) {
-  const lower = text.toLowerCase();
-  const byCategory = services.filter((s) => s.category && new RegExp(`\\b${s.category}\\b`, 'i').test(lower));
-  if (byCategory.length === 1) return byCategory[0];
-
-  const byName = services.filter((s) => lower.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(lower));
-  if (byName.length === 1) return byName[0];
-
-  return null;
-}
-
-async function handleSelectService(session, customer, input) {
-  let service = null;
-
-  if (input.buttonId && input.buttonId.startsWith('SVC_')) {
-    service = await crm.getServiceDetails(input.buttonId.replace('SVC_', ''));
-  } else if (input.text) {
-    const services = await crm.getServices();
-    service = await matchServiceByText(input.text, services);
-  }
-
-  if (!service) {
-    if (input.buttonId) {
-      await whatsapp.sendText(session.phone, "I'm sorry, that service is no longer available. Please select another service from the list.");
-    } else {
-      await whatsapp.sendText(session.phone, "I couldn't identify the service from your message. Please select the service you need from the list below.");
-    }
-    return startBooking(session, customer);
-  }
+async function continueWithService(session, customer, service, priorContext = {}) {
+  logger.log('SERVICE_SELECTED', { phone: session.phone, serviceId: service.id });
+  const { inferredServiceId, ...cleanContext } = priorContext;
+  const context = {
+    ...cleanContext,
+    serviceId: service.id,
+    serviceName: service.name,
+    price: service.basePrice || null,
+  };
+  if (context.propertyId) return advanceAfterProperty(session, context);
 
   const properties = await crm.getCustomerProperties(customer.id);
-  const context = { serviceId: service.id };
-
+  const matchedProperty = matchSavedProperty(context.locationHint, properties);
+  if (matchedProperty) {
+    return advanceAfterProperty(session, {
+      ...context,
+      propertyId: matchedProperty.id,
+      propertyLabel: propertyDisplay(matchedProperty),
+    });
+  }
   if (properties.length === 0) {
-    await whatsapp.sendText(session.phone, '📍 Thank you. Please send the full address where you need the service.');
+    const noted = context.locationHint ? ` I noted “${context.locationHint}”, but I still need the full address.` : '';
+    await whatsapp.sendText(session.phone, `Please send the full service address.${noted}`);
     await sessionStore.setFlow(session.phone, FLOW, 'awaiting_new_property', context);
     return;
   }
 
-  const rows = properties.slice(0, 9).map((p) => ({
-    id: `PROP_${p.id}`,
-    title: p.label || p.addressLine.slice(0, 24),
-    description: p.addressLine.slice(0, 72),
-  }));
-  rows.push({ id: 'PROP_NEW', title: 'Add a new address', description: 'Enter a different address' });
+  const propertyOptions = {};
+  const rows = properties.slice(0, 9).map((property) => {
+    propertyOptions[property.id] = propertyDisplay(property);
+    return {
+      id: `PROP_${property.id}`,
+      title: property.label || property.addressLine.slice(0, 24),
+      description: [property.addressLine, property.area, property.city].filter(Boolean).join(', ').slice(0, 72),
+    };
+  });
+  rows.push({ id: 'PROP_NEW', title: 'Use Another Address', description: 'Enter a different service address' });
+  await whatsapp.sendListMessage(session.phone, `Where would you like the ${service.name} professional to visit?`, 'Choose address', [
+    { title: 'Saved Addresses', rows },
+  ]);
+  await sessionStore.setFlow(session.phone, FLOW, 'select_property', { ...context, propertyOptions });
+}
 
-  await whatsapp.sendListMessage(session.phone, '📍 Please select the address where you need the service.', 'Choose address', [{ title: 'Your Addresses', rows }]);
-  await sessionStore.setFlow(session.phone, FLOW, 'select_property', context);
+async function handleSelectService(session, customer, input) {
+  const services = await crm.getServices();
+  if (input.buttonId && input.buttonId.startsWith('SVC_')) {
+    const service = await crm.getServiceDetails(input.buttonId.replace('SVC_', ''));
+    if (service) return continueWithService(session, customer, service, session.context);
+  } else if (input.text) {
+    const deterministic = matchServiceByText(input.text, services);
+    if (deterministic) {
+      return continueWithService(session, customer, deterministic, session.context);
+    }
+    const semantic = await resolveSemanticService(session, input.text, services);
+    if (semantic) {
+      return promptServiceConfirmation(session, semantic.service, {
+        ...session.context,
+        issue: session.context.issue || input.text.trim(),
+        aiServiceConfidence: semantic.confidence,
+      });
+    }
+    logger.log('AI_LOW_CONFIDENCE', { flow: FLOW, step: 'select_service' });
+  }
+  const message = input.buttonId
+    ? "I'm sorry, that service is no longer available. Please select another service."
+    : "I couldn't confidently match that request to an available service. Please select the closest option below.";
+  await promptServiceList(session, services, session.context, message);
+}
+
+async function handleConfirmService(session, customer, input) {
+  if (input.buttonId === 'CHOOSE_ANOTHER_SERVICE') {
+    const services = await crm.getServices();
+    const { inferredServiceId, ...context } = session.context;
+    return promptServiceList(session, services, context, 'Certainly. Please choose another service or describe what you need.');
+  }
+  if (input.buttonId !== 'CONFIRM_INFERRED_SERVICE') {
+    await whatsapp.sendText(session.phone, 'Please confirm the suggested service or choose another service.');
+    return;
+  }
+  const service = await crm.getServiceDetails(session.context.inferredServiceId);
+  if (!service) {
+    const services = await crm.getServices();
+    return promptServiceList(session, services, session.context, 'That service is no longer available. Please choose another service.');
+  }
+  await continueWithService(session, customer, service, session.context);
 }
 
 async function handleSelectProperty(session, customer, input) {
@@ -97,11 +217,16 @@ async function handleSelectProperty(session, customer, input) {
     return;
   }
   if (!input.buttonId || !input.buttonId.startsWith('PROP_')) {
-    await whatsapp.sendText(session.phone, 'Please select an address from the list above, or select "Add a new address".');
+    await whatsapp.sendText(session.phone, 'Please select a saved address or choose Use Another Address.');
     return;
   }
   const propertyId = input.buttonId.replace('PROP_', '');
-  await promptForDate(session, { ...session.context, propertyId });
+  await advanceAfterProperty(session, {
+    ...session.context,
+    propertyId,
+    propertyLabel: session.context.propertyOptions && session.context.propertyOptions[propertyId],
+    propertyOptions: undefined,
+  });
 }
 
 async function handleAwaitingNewProperty(session, customer, input) {
@@ -110,15 +235,44 @@ async function handleAwaitingNewProperty(session, customer, input) {
     return;
   }
   const property = await crm.addProperty(customer.id, { addressLine: input.text.trim() });
-  await promptForDate(session, { ...session.context, propertyId: property.id });
+  await advanceAfterProperty(session, {
+    ...session.context,
+    propertyId: property.id,
+    propertyLabel: propertyDisplay(property),
+  });
+}
+
+async function advanceAfterProperty(session, context) {
+  if (context.date) return showAvailability(session, context, context.date);
+  await promptForDate(session, context);
 }
 
 async function promptForDate(session, context) {
-  await whatsapp.sendButtons(session.phone, '📅 What date would you prefer? Select an option below, or enter a date in YYYY-MM-DD format.', [
+  await whatsapp.sendButtons(session.phone, 'What date would you prefer? Select an option below, or enter a date in YYYY-MM-DD format.', [
     { id: 'DATE_TODAY', title: 'Today' },
     { id: 'DATE_TOMORROW', title: 'Tomorrow' },
   ]);
   await sessionStore.setFlow(session.phone, FLOW, 'select_date', context);
+}
+
+async function showAvailability(session, context, date) {
+  const slots = await crm.getAvailability(context.serviceId, date);
+  const dateLabel = formatDateForCustomer(date);
+  if (!slots || slots.length === 0) {
+    const { date: ignoredDate, time: ignoredTime, ...retryContext } = context;
+    await whatsapp.sendText(session.phone, `I'm sorry, we don't have any available times on ${dateLabel}. Please select another date.`);
+    await sessionStore.setFlow(session.phone, FLOW, 'select_date', retryContext);
+    return;
+  }
+  const preferredSlot = selectPreferredSlot(context.preferredTime, slots);
+  if (preferredSlot) return promptItemReview(session, { ...context, date, time: preferredSlot });
+  await whatsapp.sendListMessage(session.phone, `Available times for ${dateLabel}:`, 'Choose time', [
+    { title: 'Available Times', rows: slots.slice(0, 10).map((slot) => ({
+      id: `SLOT_${slot}`,
+      title: formatSlotForCustomer(slot),
+    })) },
+  ]);
+  await sessionStore.setFlow(session.phone, FLOW, 'select_slot', { ...context, date });
 }
 
 async function handleSelectDate(session, customer, input) {
@@ -126,22 +280,11 @@ async function handleSelectDate(session, customer, input) {
   if (input.buttonId === 'DATE_TODAY') date = parseDateInput('today');
   else if (input.buttonId === 'DATE_TOMORROW') date = parseDateInput('tomorrow');
   else if (input.text) date = parseDateInput(input.text);
-
   if (!date) {
     await whatsapp.sendText(session.phone, "I couldn't identify that date. Please enter it in YYYY-MM-DD format, or select Today or Tomorrow.");
     return;
   }
-
-  const slots = await crm.getAvailability(session.context.serviceId, date);
-  if (!slots || slots.length === 0) {
-    await whatsapp.sendText(session.phone, `I'm sorry, we don't have any available times on ${date}. Please select another date.`);
-    return;
-  }
-
-  await whatsapp.sendListMessage(session.phone, `🕒 These times are available on ${date}:`, 'Choose time', [
-    { title: 'Available Slots', rows: slots.map((s) => ({ id: `SLOT_${s}`, title: s })) },
-  ]);
-  await sessionStore.setFlow(session.phone, FLOW, 'select_slot', { ...session.context, date });
+  await showAvailability(session, session.context, date);
 }
 
 async function handleSelectSlot(session, customer, input) {
@@ -149,62 +292,208 @@ async function handleSelectSlot(session, customer, input) {
     await whatsapp.sendText(session.phone, 'Please select one of the available times from the list above.');
     return;
   }
-  const time = input.buttonId.replace('SLOT_', '');
-  const { serviceId } = session.context;
-  const service = await crm.getServiceDetails(serviceId);
+  await promptItemReview(session, { ...session.context, time: input.buttonId.replace('SLOT_', '') });
+}
 
-  const priceLine = service && service.basePrice ? `\n💰 Price: AED ${service.basePrice}` : '';
+async function promptItemReview(session, context) {
+  let serviceName = context.serviceName;
+  if (!serviceName) {
+    const service = await crm.getServiceDetails(context.serviceId);
+    serviceName = service ? service.name : 'Service';
+  }
+  const currentItem = {
+    serviceId: context.serviceId,
+    serviceName,
+    propertyId: context.propertyId,
+    propertyLabel: context.propertyLabel || context.locationHint || 'Saved service address',
+    date: context.date,
+    time: context.time,
+    issue: context.issue || null,
+  };
+  const issueLine = currentItem.issue ? `\n📝 ${currentItem.issue}` : '';
   await whatsapp.sendButtons(
     session.phone,
-    `Please review your booking details:\n\n🔧 ${service ? service.name : 'Service'}\n📅 ${session.context.date} at ${time}${priceLine}`,
+    `Here's what I have:\n\n🔧 ${currentItem.serviceName}\n📍 ${currentItem.propertyLabel}\n📅 ${formatDateForCustomer(currentItem.date)}\n🕙 ${formatSlotForCustomer(currentItem.time)}${issueLine}\n\nWould you like to add another service or continue with this booking?`,
     [
-      { id: 'CONFIRM_BOOKING', title: '✓ Confirm' },
-      { id: 'CANCEL_FLOW', title: '✗ Cancel' },
+      { id: 'ADD_ANOTHER_SERVICE', title: 'Add Another Service' },
+      { id: 'PROCEED_TO_BOOKING', title: 'Proceed to Booking' },
+      { id: 'CHANGE_BOOKING_DETAILS', title: 'Change Details' },
     ]
   );
-  await sessionStore.setFlow(session.phone, FLOW, 'confirm', { ...session.context, time });
+  await sessionStore.setFlow(session.phone, FLOW, 'review_item', { ...context, currentItem });
+}
+
+async function handleReviewItem(session, customer, input) {
+  const { currentItem } = session.context;
+  if (!currentItem) {
+    await whatsapp.sendText(session.phone, 'I could not find the service details. Please type "menu" to start again.');
+    return;
+  }
+  if (input.buttonId === 'CHANGE_BOOKING_DETAILS') {
+    return promptChangeDetails(session, session.context.cart || [], currentItem);
+  }
+  if (!['ADD_ANOTHER_SERVICE', 'PROCEED_TO_BOOKING'].includes(input.buttonId)) {
+    await whatsapp.sendText(session.phone, 'Please select Add Another Service, Proceed to Booking, or Change Details.');
+    return;
+  }
+  const cart = [...(session.context.cart || []), currentItem];
+  if (input.buttonId === 'ADD_ANOTHER_SERVICE') {
+    const services = await crm.getServices();
+    return promptServiceList(session, services, {
+      cart,
+      propertyId: currentItem.propertyId,
+      propertyLabel: currentItem.propertyLabel,
+      date: currentItem.date,
+    }, 'Your service is ready to book. What other service would you like to add for the same address?');
+  }
+  await promptFinalConfirmation(session, cart);
+}
+
+async function promptChangeDetails(session, cart, currentItem) {
+  await whatsapp.sendButtons(session.phone, 'Which booking detail would you like to change?', [
+    { id: 'CHANGE_SERVICE', title: 'Service' },
+    { id: 'CHANGE_ADDRESS', title: 'Address' },
+    { id: 'CHANGE_DATE_TIME', title: 'Date / Time' },
+  ]);
+  await sessionStore.setFlow(session.phone, FLOW, 'change_details', { cart, currentItem });
+}
+
+async function handleChangeDetails(session, customer, input) {
+  const { cart = [], currentItem } = session.context;
+  if (!currentItem) {
+    await whatsapp.sendText(session.phone, 'I could not find the booking details. Please type "menu" to start again.');
+    return;
+  }
+  if (input.buttonId === 'CHANGE_SERVICE') {
+    const services = await crm.getServices();
+    return promptServiceList(session, services, {
+      cart,
+      propertyId: currentItem.propertyId,
+      propertyLabel: currentItem.propertyLabel,
+      date: currentItem.date,
+      issue: currentItem.issue,
+    }, 'Certainly. Please choose the service you need.');
+  }
+  if (input.buttonId === 'CHANGE_ADDRESS') {
+    const service = await crm.getServiceDetails(currentItem.serviceId);
+    return continueWithService(session, customer, service || {
+      id: currentItem.serviceId,
+      name: currentItem.serviceName,
+    }, {
+      cart,
+      date: currentItem.date,
+      issue: currentItem.issue,
+    });
+  }
+  if (input.buttonId === 'CHANGE_DATE_TIME') {
+    return promptForDate(session, { ...currentItem, cart, date: undefined, time: undefined });
+  }
+  await whatsapp.sendText(session.phone, 'Please select Service, Address, or Date / Time.');
+}
+
+async function promptFinalConfirmation(session, cart) {
+  const lines = cart.map((item, index) =>
+    `${cart.length > 1 ? `${index + 1}. ` : ''}${item.serviceName}\n📍 ${item.propertyLabel}\n📅 ${formatDateForCustomer(item.date)}\n🕙 ${formatSlotForCustomer(item.time)}`
+  );
+  await whatsapp.sendButtons(
+    session.phone,
+    `Everything is ready.\n\n${lines.join('\n\n')}\n\nShall I confirm ${cart.length > 1 ? 'these bookings' : 'the booking'}?`,
+    [
+      { id: 'CONFIRM_BOOKING', title: 'Confirm Booking' },
+      { id: 'CHANGE_BOOKING_DETAILS', title: 'Change Details' },
+      { id: 'CANCEL_FLOW', title: 'Cancel' },
+    ]
+  );
+  await sessionStore.setFlow(session.phone, FLOW, 'confirm', { cart });
 }
 
 async function handleConfirm(session, customer, input) {
   if (input.buttonId === 'CANCEL_FLOW') {
+    logger.log('BOOKING_ABANDONED', { phone: session.phone, step: 'confirm' });
     await sessionStore.clearFlow(session.phone);
     await whatsapp.sendText(session.phone, 'Certainly. Your booking request has been cancelled. Type "menu" whenever you would like to start again.');
     return;
   }
+  if (input.buttonId === 'CHANGE_BOOKING_DETAILS') {
+    const item = session.context.cart && session.context.cart[session.context.cart.length - 1];
+    if (item) return promptChangeDetails(session, session.context.cart.slice(0, -1), item);
+  }
   if (input.buttonId !== 'CONFIRM_BOOKING') {
-    await whatsapp.sendText(session.phone, 'Please select Confirm or Cancel to continue.');
+    await whatsapp.sendText(session.phone, 'Please select Confirm Booking, Change Details, or Cancel.');
     return;
   }
 
-  const { serviceId, propertyId, date, time } = session.context;
-  if (!serviceId || !propertyId || !date || !time) {
+  const fallbackItem = {
+    serviceId: session.context.serviceId,
+    propertyId: session.context.propertyId,
+    serviceName: session.context.serviceName,
+    propertyLabel: session.context.propertyLabel,
+    date: session.context.date,
+    time: session.context.time,
+    issue: session.context.issue,
+  };
+  const cart = session.context.cart && session.context.cart.length ? session.context.cart : [fallbackItem];
+  if (cart.some((item) => !item.serviceId || !item.propertyId || !item.date || !item.time)) {
     logger.error('BOOKING', 'Missing required fields at confirm step', session.context);
     await whatsapp.sendText(session.phone, 'I\'m sorry, some booking details are missing, so I could not complete the request. Please type "menu" to start again.');
     await sessionStore.clearFlow(session.phone);
     return;
   }
 
-  try {
-    const booking = await crm.createBooking({ customerId: customer.id, propertyId, serviceId, date, time });
-    await sessionStore.clearFlow(session.phone);
-    await whatsapp.sendText(
-      session.phone,
-      `✅ Your booking has been confirmed successfully.\n\nReference: *${booking.reference}*\n📅 ${booking.scheduledDate} at ${booking.scheduledTime}\n\nIf you need anything else, type "menu".`
-    );
-  } catch (err) {
-    logger.error('BOOKING', 'createBooking failed:', err.message);
-    await whatsapp.sendText(session.phone, "I'm sorry, I couldn't confirm your booking because of a system error. Please try again shortly, or type \"support\" to speak with our team.");
+  const confirmed = [];
+  for (let index = 0; index < cart.length; index += 1) {
+    const item = cart[index];
+    const payload = {
+      customerId: customer.id,
+      propertyId: item.propertyId,
+      serviceId: item.serviceId,
+      date: item.date,
+      time: item.time,
+    };
+    if (item.issue) payload.notes = item.issue;
+    try {
+      const booking = await crm.createBooking(payload);
+      let serviceName = item.serviceName;
+      if (!serviceName) {
+        const service = await crm.getServiceDetails(item.serviceId);
+        serviceName = service ? service.name : 'Service';
+      }
+      confirmed.push({ ...booking, serviceName, requestedDate: item.date, requestedTime: item.time });
+    } catch (err) {
+      logger.error('BOOKING', 'createBooking failed:', err.message);
+      if (confirmed.length === 0) {
+        await whatsapp.sendText(session.phone, "I'm sorry, I couldn't confirm your booking because of a system error. Your booking details are still saved, so you can try Confirm Booking again.");
+      } else {
+        await sessionStore.setFlow(session.phone, FLOW, 'confirm', { cart: cart.slice(index) });
+        const references = confirmed.map((booking) => booking.reference).join(', ');
+        await whatsapp.sendText(session.phone, `I confirmed ${confirmed.length} service${confirmed.length > 1 ? 's' : ''} (${references}), but I could not confirm the remaining service${cart.length - index > 1 ? 's' : ''}. The remaining details are still saved; please try again or type "support".`);
+      }
+      return;
+    }
   }
+
+  await sessionStore.clearFlow(session.phone);
+  logger.log('BOOKING_COMPLETED', { phone: session.phone, count: confirmed.length });
+  const summaries = confirmed.map((booking) =>
+    `Reference: *${booking.reference}*\nService: ${booking.serviceName}\nDate: ${formatDateForCustomer(booking.scheduledDate || booking.requestedDate)}\nTime: ${formatSlotForCustomer(booking.scheduledTime || booking.requestedTime)}`
+  );
+  await whatsapp.sendText(
+    session.phone,
+    `Your booking${confirmed.length > 1 ? 's are' : ' is'} confirmed ✅\n\n${summaries.join('\n\n')}\n\nWe'll keep you updated here on WhatsApp. If you need to make changes, simply message me.`
+  );
 }
 
 module.exports = {
   startBooking,
   steps: {
     select_service: handleSelectService,
+    confirm_service: handleConfirmService,
     select_property: handleSelectProperty,
     awaiting_new_property: handleAwaitingNewProperty,
     select_date: handleSelectDate,
     select_slot: handleSelectSlot,
+    review_item: handleReviewItem,
+    change_details: handleChangeDetails,
     confirm: handleConfirm,
   },
 };

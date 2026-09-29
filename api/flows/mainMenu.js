@@ -5,7 +5,7 @@ async function sendMainMenu(session, customer) {
   await sessionStore.clearFlow(session.phone);
   await whatsapp.sendListMessage(
     session.phone,
-    '👋 Welcome. I can help you book a service, manage an existing booking, register a complaint, or connect with our support team. How can I help today?',
+    'Hello 👋 Welcome to Joboy.\n\nI can help you book a home service, manage an existing booking, or resolve a service issue.\n\nHow can I help you today?',
     'View options',
     [
       {

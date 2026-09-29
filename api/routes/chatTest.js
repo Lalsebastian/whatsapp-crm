@@ -26,6 +26,8 @@ router.post('/', async (req, res) => {
       reply: messages.map((m) => m.body).join('\n---\n') || null,
       options: messages.flatMap((m) => m.options || []).map((o) => ({ id: o.id, title: o.title })),
       intent: result.intent || null,
+      confidence: result.confidence ?? null,
+      aiMatch: result.aiMatch || null,
       flow: result.flow || null,
       step: result.step || null,
       humanTakeover: !!result.humanTakeover,

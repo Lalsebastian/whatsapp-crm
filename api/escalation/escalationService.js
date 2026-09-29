@@ -10,6 +10,7 @@
 // isn't a good enough reason to permanently silence the bot for that
 // customer; only genuine repeated failure to understand them is.
 const sessionStore = require('../session/sessionStore');
+const logger = require('../utils/logger');
 
 const RE_SAFETY = /\b(unsafe|danger|threat|harass|inappropriate|scared|afraid)\b/i;
 const RE_PAYMENT = /\b(refund|overcharg|payment issue|money back|dispute|scam)\b/i;
@@ -46,6 +47,7 @@ function evaluateTriggers({ text = '', intent, confidence, category, repeatedCom
 async function triggerEscalation({ crm, phone, customerId, reason, summary }) {
   await crm.escalateToHuman({ customerId, phone, reason, summary });
   await sessionStore.setHumanTakeover(phone, true);
+  logger.log('HUMAN_ESCALATION', { phone, reason });
 }
 
 module.exports = { evaluateTriggers, triggerEscalation, isStruggling };

@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const geminiProvider = require('../../ai/providers/geminiProvider');
 geminiProvider.callGemini = vi.fn();
 
-const { detectIntent } = require('../../ai/intentService');
+const { detectIntent, classifyComplaintCategory, matchServiceToCatalog } = require('../../ai/intentService');
 const { callGemini } = geminiProvider;
 
 describe('detectIntent', () => {
@@ -22,7 +22,8 @@ describe('detectIntent', () => {
 
     const result = await detectIntent('Nale evening AC service venam');
     expect(result).toEqual({
-      intent: 'NEW_BOOKING', service: 'AC', preferredDate: 'tomorrow', preferredTime: 'evening', language: 'manglish', confidence: 0.94,
+      intent: 'NEW_BOOKING', service: 'AC', issue: null, locationHint: null,
+      preferredDate: 'tomorrow', preferredTime: 'evening', language: 'manglish', confidence: 0.94,
     });
   });
 
@@ -56,5 +57,48 @@ describe('detectIntent', () => {
     callGemini.mockResolvedValueOnce('```json\n{"intent":"HUMAN_AGENT","confidence":0.8}\n```');
     const result = await detectIntent('let me talk to someone');
     expect(result.intent).toBe('HUMAN_AGENT');
+  });
+});
+
+describe('matchServiceToCatalog', () => {
+  beforeEach(() => { callGemini.mockReset(); });
+
+  const services = [
+    { id: 'svc-electrical', name: 'Electrical', category: 'electrical' },
+    { id: 'svc-plumbing', name: 'Plumbing', category: 'plumbing' },
+  ];
+
+  it('accepts only a service ID supplied by CRM', async () => {
+    callGemini.mockResolvedValueOnce(JSON.stringify({ serviceId: 'svc-electrical', confidence: 0.93 }));
+    await expect(matchServiceToCatalog('light is not working', services)).resolves.toEqual({
+      serviceId: 'svc-electrical', confidence: 0.93,
+    });
+  });
+
+  it('rejects an invented service ID', async () => {
+    callGemini.mockResolvedValueOnce(JSON.stringify({ serviceId: 'svc-invented', confidence: 0.99 }));
+    await expect(matchServiceToCatalog('fix something', services)).resolves.toEqual({
+      serviceId: null, confidence: 0,
+    });
+  });
+});
+
+describe('classifyComplaintCategory', () => {
+  beforeEach(() => { callGemini.mockReset(); });
+
+  it('returns a validated complaint category for natural language', async () => {
+    callGemini.mockResolvedValueOnce(JSON.stringify({ category: 'technician_delayed', confidence: 0.91 }));
+
+    const result = await classifyComplaintCategory('The technician arrived very late');
+
+    expect(result).toEqual({ category: 'technician_delayed', confidence: 0.91 });
+  });
+
+  it('falls back safely when the model returns an invalid category', async () => {
+    callGemini.mockResolvedValueOnce(JSON.stringify({ category: 'technician_rude', confidence: 0.95 }));
+
+    const result = await classifyComplaintCategory('The technician was rude');
+
+    expect(result).toEqual({ category: null, confidence: 0 });
   });
 });

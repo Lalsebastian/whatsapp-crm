@@ -2,16 +2,26 @@
 const whatsapp = require('../whatsapp/client');
 const sessionStore = require('../session/sessionStore');
 const logger = require('../utils/logger');
-const { parseDateInput } = require('./dateUtils');
+const { parseDateInput, formatDateForCustomer, formatSlotForCustomer } = require('./dateUtils');
 const { getCrmAdapter } = require('../crm');
 
 const crm = getCrmAdapter();
 const FLOW = 'my_bookings';
 
 function formatStatus(status) {
-  return status
+  const labels = {
+    pending: 'Booking Pending',
+    confirmed: 'Booking Confirmed',
+    technician_assigned: 'Technician Assigned',
+    technician_on_the_way: 'Technician On The Way',
+    in_progress: 'Service In Progress',
+    completed: 'Completed',
+    cancelled: 'Cancelled',
+    rescheduled: 'Rescheduled',
+  };
+  return labels[status] || (status
     ? status.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
-    : 'Not available';
+    : 'Not available');
 }
 
 async function showMyBookings(session, customer) {
@@ -28,7 +38,7 @@ async function showMyBookings(session, customer) {
       rows: bookings.map((b) => ({
         id: `BKG_${b.id}`,
         title: b.reference,
-        description: `${b.scheduledDate || ''} ${b.scheduledTime || ''} — ${formatStatus(b.status)}`.slice(0, 72),
+        description: `${formatDateForCustomer(b.scheduledDate)} ${formatSlotForCustomer(b.scheduledTime)} — ${formatStatus(b.status)}`.slice(0, 72),
       })),
     },
   ]);
@@ -49,7 +59,7 @@ async function handleSelectBooking(session, customer, input) {
 
   await whatsapp.sendButtons(
     session.phone,
-    `📋 Booking ${booking.reference}\n📅 ${booking.scheduledDate} at ${booking.scheduledTime}\nStatus: ${formatStatus(booking.status)}`,
+    `📋 Booking ${booking.reference}\n📅 ${formatDateForCustomer(booking.scheduledDate)}\n🕙 ${formatSlotForCustomer(booking.scheduledTime)}\nStatus: ${formatStatus(booking.status)}`,
     [
       { id: 'ACTION_RESCHEDULE', title: 'Reschedule' },
       { id: 'ACTION_CANCEL', title: 'Cancel' },
@@ -68,8 +78,8 @@ async function handleSelectAction(session, customer, input) {
   }
   if (input.buttonId === 'ACTION_CANCEL') {
     await whatsapp.sendButtons(session.phone, `Please confirm that you want to cancel booking ${booking.reference}. This action cannot be undone.`, [
-      { id: 'CANCEL_YES', title: 'Yes, cancel' },
-      { id: 'CANCEL_NO', title: 'No, keep it' },
+      { id: 'CANCEL_YES', title: 'Yes, Cancel Booking' },
+      { id: 'CANCEL_NO', title: 'Keep Booking' },
     ]);
     await sessionStore.setFlow(session.phone, FLOW, 'confirm_cancel', { booking });
     return;
@@ -120,12 +130,12 @@ async function handleAwaitingRescheduleDate(session, customer, input) {
 
   const slots = await crm.getAvailability(booking.serviceId, date);
   if (!slots || slots.length === 0) {
-    await whatsapp.sendText(session.phone, `I'm sorry, we don't have any available times on ${date}. Please select another date.`);
+    await whatsapp.sendText(session.phone, `I'm sorry, we don't have any available times on ${formatDateForCustomer(date)}. Please select another date.`);
     return;
   }
 
-  await whatsapp.sendListMessage(session.phone, `🕒 These times are available on ${date}:`, 'Choose time', [
-    { title: 'Available Slots', rows: slots.map((s) => ({ id: `SLOT_${s}`, title: s })) },
+  await whatsapp.sendListMessage(session.phone, `Available times for ${formatDateForCustomer(date)}:`, 'Choose time', [
+    { title: 'Available Times', rows: slots.map((s) => ({ id: `SLOT_${s}`, title: formatSlotForCustomer(s) })) },
   ]);
   await sessionStore.setFlow(session.phone, FLOW, 'awaiting_reschedule_slot', { booking, date });
 }
@@ -140,7 +150,7 @@ async function handleAwaitingRescheduleSlot(session, customer, input) {
   try {
     const updated = await crm.rescheduleBooking(booking.id, { date, time });
     await sessionStore.clearFlow(session.phone);
-    await whatsapp.sendText(session.phone, `✅ Booking ${updated.reference} has been rescheduled successfully for ${updated.scheduledDate} at ${updated.scheduledTime}.`);
+    await whatsapp.sendText(session.phone, `✅ Booking ${updated.reference} has been rescheduled for ${formatDateForCustomer(updated.scheduledDate)} at ${formatSlotForCustomer(updated.scheduledTime)}.`);
   } catch (err) {
     logger.error('MY_BOOKINGS', 'rescheduleBooking failed:', err.message);
     await whatsapp.sendText(session.phone, "I'm sorry, I couldn't reschedule that booking because of a system error. Please try again, or type \"support\" to speak with our team.");
