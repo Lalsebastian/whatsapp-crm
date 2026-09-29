@@ -99,7 +99,7 @@ describe('booking flow — select_service step', () => {
     const session = { phone: '971500', context: {} };
     await booking.steps.select_service(session, { id: 'cust1' }, { text: 'what time do you close' });
 
-    expect(whatsapp.sendText).toHaveBeenCalledWith('971500', expect.stringContaining("couldn't match"));
+    expect(whatsapp.sendText).toHaveBeenCalledWith('971500', expect.stringContaining("couldn't identify the service"));
     expect(whatsapp.sendListMessage).toHaveBeenCalled();
     expect(fakeCrm.getCustomerProperties).not.toHaveBeenCalled();
   });

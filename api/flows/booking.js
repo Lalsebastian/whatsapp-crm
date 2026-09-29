@@ -14,13 +14,13 @@ const FLOW = 'booking';
 async function startBooking(session, customer) {
   const services = await crm.getServices();
   if (!services || services.length === 0) {
-    await whatsapp.sendText(session.phone, 'Sorry, no services are available to book right now. Please try again later or type "support" to talk to our team.');
+    await whatsapp.sendText(session.phone, "I'm sorry, our services are not available for booking right now. Please try again shortly, or type \"support\" to speak with our team.");
     return;
   }
 
   await whatsapp.sendListMessage(
     session.phone,
-    'Which service would you like to book?',
+    'Certainly. Which service would you like to book?',
     'Choose service',
     [
       {
@@ -63,9 +63,9 @@ async function handleSelectService(session, customer, input) {
 
   if (!service) {
     if (input.buttonId) {
-      await whatsapp.sendText(session.phone, "Sorry, that service isn't available anymore. Please choose another.");
+      await whatsapp.sendText(session.phone, "I'm sorry, that service is no longer available. Please select another service from the list.");
     } else {
-      await whatsapp.sendText(session.phone, "I couldn't match that to a service — please pick one from the list.");
+      await whatsapp.sendText(session.phone, "I couldn't identify the service from your message. Please select the service you need from the list below.");
     }
     return startBooking(session, customer);
   }
@@ -74,7 +74,7 @@ async function handleSelectService(session, customer, input) {
   const context = { serviceId: service.id };
 
   if (properties.length === 0) {
-    await whatsapp.sendText(session.phone, '📍 Which address should we visit? Please type the full address.');
+    await whatsapp.sendText(session.phone, '📍 Thank you. Please send the full address where you need the service.');
     await sessionStore.setFlow(session.phone, FLOW, 'awaiting_new_property', context);
     return;
   }
@@ -86,18 +86,18 @@ async function handleSelectService(session, customer, input) {
   }));
   rows.push({ id: 'PROP_NEW', title: 'Add a new address', description: 'Enter a different address' });
 
-  await whatsapp.sendListMessage(session.phone, '📍 Which address should we visit?', 'Choose address', [{ title: 'Your Addresses', rows }]);
+  await whatsapp.sendListMessage(session.phone, '📍 Please select the address where you need the service.', 'Choose address', [{ title: 'Your Addresses', rows }]);
   await sessionStore.setFlow(session.phone, FLOW, 'select_property', context);
 }
 
 async function handleSelectProperty(session, customer, input) {
   if (input.buttonId === 'PROP_NEW') {
-    await whatsapp.sendText(session.phone, 'Please type the full address.');
+    await whatsapp.sendText(session.phone, 'Certainly. Please send the full service address.');
     await sessionStore.setFlow(session.phone, FLOW, 'awaiting_new_property', session.context);
     return;
   }
   if (!input.buttonId || !input.buttonId.startsWith('PROP_')) {
-    await whatsapp.sendText(session.phone, 'Please choose an address from the list above.');
+    await whatsapp.sendText(session.phone, 'Please select an address from the list above, or select "Add a new address".');
     return;
   }
   const propertyId = input.buttonId.replace('PROP_', '');
@@ -106,7 +106,7 @@ async function handleSelectProperty(session, customer, input) {
 
 async function handleAwaitingNewProperty(session, customer, input) {
   if (!input.text || input.text.trim().length < 5) {
-    await whatsapp.sendText(session.phone, 'That address looks too short — please type your full address.');
+    await whatsapp.sendText(session.phone, 'Please send the full service address so our technician can locate it.');
     return;
   }
   const property = await crm.addProperty(customer.id, { addressLine: input.text.trim() });
@@ -114,7 +114,7 @@ async function handleAwaitingNewProperty(session, customer, input) {
 }
 
 async function promptForDate(session, context) {
-  await whatsapp.sendButtons(session.phone, '📅 When would you like the service? Choose an option or type a date (YYYY-MM-DD).', [
+  await whatsapp.sendButtons(session.phone, '📅 What date would you prefer? Select an option below, or enter a date in YYYY-MM-DD format.', [
     { id: 'DATE_TODAY', title: 'Today' },
     { id: 'DATE_TOMORROW', title: 'Tomorrow' },
   ]);
@@ -128,17 +128,17 @@ async function handleSelectDate(session, customer, input) {
   else if (input.text) date = parseDateInput(input.text);
 
   if (!date) {
-    await whatsapp.sendText(session.phone, "I couldn't understand that date. Please type it as YYYY-MM-DD, or tap Today/Tomorrow.");
+    await whatsapp.sendText(session.phone, "I couldn't identify that date. Please enter it in YYYY-MM-DD format, or select Today or Tomorrow.");
     return;
   }
 
   const slots = await crm.getAvailability(session.context.serviceId, date);
   if (!slots || slots.length === 0) {
-    await whatsapp.sendText(session.phone, `Sorry, no time slots are available on ${date}. Please try another date.`);
+    await whatsapp.sendText(session.phone, `I'm sorry, we don't have any available times on ${date}. Please select another date.`);
     return;
   }
 
-  await whatsapp.sendListMessage(session.phone, `🕒 Available times on ${date}:`, 'Choose time', [
+  await whatsapp.sendListMessage(session.phone, `🕒 These times are available on ${date}:`, 'Choose time', [
     { title: 'Available Slots', rows: slots.map((s) => ({ id: `SLOT_${s}`, title: s })) },
   ]);
   await sessionStore.setFlow(session.phone, FLOW, 'select_slot', { ...session.context, date });
@@ -146,7 +146,7 @@ async function handleSelectDate(session, customer, input) {
 
 async function handleSelectSlot(session, customer, input) {
   if (!input.buttonId || !input.buttonId.startsWith('SLOT_')) {
-    await whatsapp.sendText(session.phone, 'Please choose a time slot from the list above.');
+    await whatsapp.sendText(session.phone, 'Please select one of the available times from the list above.');
     return;
   }
   const time = input.buttonId.replace('SLOT_', '');
@@ -156,7 +156,7 @@ async function handleSelectSlot(session, customer, input) {
   const priceLine = service && service.basePrice ? `\n💰 Price: AED ${service.basePrice}` : '';
   await whatsapp.sendButtons(
     session.phone,
-    `Please confirm your booking:\n\n🔧 ${service ? service.name : 'Service'}\n📅 ${session.context.date} at ${time}${priceLine}`,
+    `Please review your booking details:\n\n🔧 ${service ? service.name : 'Service'}\n📅 ${session.context.date} at ${time}${priceLine}`,
     [
       { id: 'CONFIRM_BOOKING', title: '✓ Confirm' },
       { id: 'CANCEL_FLOW', title: '✗ Cancel' },
@@ -168,18 +168,18 @@ async function handleSelectSlot(session, customer, input) {
 async function handleConfirm(session, customer, input) {
   if (input.buttonId === 'CANCEL_FLOW') {
     await sessionStore.clearFlow(session.phone);
-    await whatsapp.sendText(session.phone, 'No problem — booking cancelled. Type "menu" anytime to start again.');
+    await whatsapp.sendText(session.phone, 'Certainly. Your booking request has been cancelled. Type "menu" whenever you would like to start again.');
     return;
   }
   if (input.buttonId !== 'CONFIRM_BOOKING') {
-    await whatsapp.sendText(session.phone, 'Please tap Confirm or Cancel.');
+    await whatsapp.sendText(session.phone, 'Please select Confirm or Cancel to continue.');
     return;
   }
 
   const { serviceId, propertyId, date, time } = session.context;
   if (!serviceId || !propertyId || !date || !time) {
     logger.error('BOOKING', 'Missing required fields at confirm step', session.context);
-    await whatsapp.sendText(session.phone, "Something went wrong with your booking details — let's start over.");
+    await whatsapp.sendText(session.phone, 'I\'m sorry, some booking details are missing, so I could not complete the request. Please type "menu" to start again.');
     await sessionStore.clearFlow(session.phone);
     return;
   }
@@ -189,11 +189,11 @@ async function handleConfirm(session, customer, input) {
     await sessionStore.clearFlow(session.phone);
     await whatsapp.sendText(
       session.phone,
-      `✅ Booking confirmed!\n\nReference: *${booking.reference}*\n📅 ${booking.scheduledDate} at ${booking.scheduledTime}\n\nType "menu" for other options.`
+      `✅ Your booking has been confirmed successfully.\n\nReference: *${booking.reference}*\n📅 ${booking.scheduledDate} at ${booking.scheduledTime}\n\nIf you need anything else, type "menu".`
     );
   } catch (err) {
     logger.error('BOOKING', 'createBooking failed:', err.message);
-    await whatsapp.sendText(session.phone, "Sorry, we couldn't complete your booking due to a system error. Please try again shortly, or type \"support\" to talk to our team.");
+    await whatsapp.sendText(session.phone, "I'm sorry, I couldn't confirm your booking because of a system error. Please try again shortly, or type \"support\" to speak with our team.");
   }
 }
 

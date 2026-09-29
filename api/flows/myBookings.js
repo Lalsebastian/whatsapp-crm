@@ -8,21 +8,27 @@ const { getCrmAdapter } = require('../crm');
 const crm = getCrmAdapter();
 const FLOW = 'my_bookings';
 
+function formatStatus(status) {
+  return status
+    ? status.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : 'Not available';
+}
+
 async function showMyBookings(session, customer) {
   const bookings = await crm.getBookings(customer.id, { limit: 5 });
   if (!bookings || bookings.length === 0) {
-    await whatsapp.sendButtons(session.phone, "You don't have any bookings yet.", [{ id: 'BOOK_SERVICE', title: 'Book a Service' }]);
+    await whatsapp.sendButtons(session.phone, "You don't have any bookings yet. Would you like to book a service?", [{ id: 'BOOK_SERVICE', title: 'Book a Service' }]);
     await sessionStore.clearFlow(session.phone);
     return;
   }
 
-  await whatsapp.sendListMessage(session.phone, 'Here are your recent bookings:', 'Choose booking', [
+  await whatsapp.sendListMessage(session.phone, 'Certainly. Please select one of your recent bookings.', 'Choose booking', [
     {
       title: 'Your Bookings',
       rows: bookings.map((b) => ({
         id: `BKG_${b.id}`,
         title: b.reference,
-        description: `${b.scheduledDate || ''} ${b.scheduledTime || ''} — ${b.status}`.slice(0, 72),
+        description: `${b.scheduledDate || ''} ${b.scheduledTime || ''} — ${formatStatus(b.status)}`.slice(0, 72),
       })),
     },
   ]);
@@ -31,19 +37,19 @@ async function showMyBookings(session, customer) {
 
 async function handleSelectBooking(session, customer, input) {
   if (!input.buttonId || !input.buttonId.startsWith('BKG_')) {
-    await whatsapp.sendText(session.phone, 'Please choose a booking from the list above.');
+    await whatsapp.sendText(session.phone, 'Please select a booking from the list above.');
     return;
   }
   const bookingId = input.buttonId.replace('BKG_', '');
   const booking = (session.context.bookings || []).find((b) => b.id === bookingId);
   if (!booking) {
-    await whatsapp.sendText(session.phone, "Sorry, I couldn't find that booking. Let's try again.");
+    await whatsapp.sendText(session.phone, "I'm sorry, I couldn't find that booking. I'll show you the latest list so you can try again.");
     return showMyBookings(session, customer);
   }
 
   await whatsapp.sendButtons(
     session.phone,
-    `📋 Booking ${booking.reference}\n📅 ${booking.scheduledDate} at ${booking.scheduledTime}\nStatus: ${booking.status}`,
+    `📋 Booking ${booking.reference}\n📅 ${booking.scheduledDate} at ${booking.scheduledTime}\nStatus: ${formatStatus(booking.status)}`,
     [
       { id: 'ACTION_RESCHEDULE', title: 'Reschedule' },
       { id: 'ACTION_CANCEL', title: 'Cancel' },
@@ -61,7 +67,7 @@ async function handleSelectAction(session, customer, input) {
     return showMyBookings(session, customer);
   }
   if (input.buttonId === 'ACTION_CANCEL') {
-    await whatsapp.sendButtons(session.phone, `Cancel booking ${booking.reference}? This can't be undone.`, [
+    await whatsapp.sendButtons(session.phone, `Please confirm that you want to cancel booking ${booking.reference}. This action cannot be undone.`, [
       { id: 'CANCEL_YES', title: 'Yes, cancel' },
       { id: 'CANCEL_NO', title: 'No, keep it' },
     ]);
@@ -69,34 +75,34 @@ async function handleSelectAction(session, customer, input) {
     return;
   }
   if (input.buttonId === 'ACTION_RESCHEDULE') {
-    await whatsapp.sendButtons(session.phone, '📅 What new date would you like? Choose an option or type a date (YYYY-MM-DD).', [
+    await whatsapp.sendButtons(session.phone, '📅 Certainly. What new date would you prefer? Select an option, or enter a date in YYYY-MM-DD format.', [
       { id: 'DATE_TODAY', title: 'Today' },
       { id: 'DATE_TOMORROW', title: 'Tomorrow' },
     ]);
     await sessionStore.setFlow(session.phone, FLOW, 'awaiting_reschedule_date', { booking });
     return;
   }
-  await whatsapp.sendText(session.phone, 'Please choose Reschedule, Cancel, or Back.');
+  await whatsapp.sendText(session.phone, 'Please select Reschedule, Cancel, or Back.');
 }
 
 async function handleConfirmCancel(session, customer, input) {
   const { booking } = session.context;
   if (input.buttonId === 'CANCEL_NO') {
     await sessionStore.clearFlow(session.phone);
-    await whatsapp.sendText(session.phone, 'No changes made. Type "menu" anytime.');
+    await whatsapp.sendText(session.phone, 'Certainly. Your booking has not been changed. Type "menu" if you need any further assistance.');
     return;
   }
   if (input.buttonId !== 'CANCEL_YES') {
-    await whatsapp.sendText(session.phone, 'Please tap Yes or No.');
+    await whatsapp.sendText(session.phone, 'Please select Yes or No to continue.');
     return;
   }
   try {
     await crm.cancelBooking(booking.id);
     await sessionStore.clearFlow(session.phone);
-    await whatsapp.sendText(session.phone, `Booking ${booking.reference} has been cancelled.`);
+    await whatsapp.sendText(session.phone, `Booking ${booking.reference} has been cancelled successfully.`);
   } catch (err) {
     logger.error('MY_BOOKINGS', 'cancelBooking failed:', err.message);
-    await whatsapp.sendText(session.phone, "Sorry, we couldn't cancel that booking due to a system error. Please try again or type \"support\".");
+    await whatsapp.sendText(session.phone, "I'm sorry, I couldn't cancel that booking because of a system error. Please try again, or type \"support\" to speak with our team.");
   }
 }
 
@@ -108,17 +114,17 @@ async function handleAwaitingRescheduleDate(session, customer, input) {
   else if (input.text) date = parseDateInput(input.text);
 
   if (!date) {
-    await whatsapp.sendText(session.phone, "I couldn't understand that date. Please type it as YYYY-MM-DD, or tap Today/Tomorrow.");
+    await whatsapp.sendText(session.phone, "I couldn't identify that date. Please enter it in YYYY-MM-DD format, or select Today or Tomorrow.");
     return;
   }
 
   const slots = await crm.getAvailability(booking.serviceId, date);
   if (!slots || slots.length === 0) {
-    await whatsapp.sendText(session.phone, `Sorry, no time slots are available on ${date}. Please try another date.`);
+    await whatsapp.sendText(session.phone, `I'm sorry, we don't have any available times on ${date}. Please select another date.`);
     return;
   }
 
-  await whatsapp.sendListMessage(session.phone, `🕒 Available times on ${date}:`, 'Choose time', [
+  await whatsapp.sendListMessage(session.phone, `🕒 These times are available on ${date}:`, 'Choose time', [
     { title: 'Available Slots', rows: slots.map((s) => ({ id: `SLOT_${s}`, title: s })) },
   ]);
   await sessionStore.setFlow(session.phone, FLOW, 'awaiting_reschedule_slot', { booking, date });
@@ -127,17 +133,17 @@ async function handleAwaitingRescheduleDate(session, customer, input) {
 async function handleAwaitingRescheduleSlot(session, customer, input) {
   const { booking, date } = session.context;
   if (!input.buttonId || !input.buttonId.startsWith('SLOT_')) {
-    await whatsapp.sendText(session.phone, 'Please choose a time slot from the list above.');
+    await whatsapp.sendText(session.phone, 'Please select one of the available times from the list above.');
     return;
   }
   const time = input.buttonId.replace('SLOT_', '');
   try {
     const updated = await crm.rescheduleBooking(booking.id, { date, time });
     await sessionStore.clearFlow(session.phone);
-    await whatsapp.sendText(session.phone, `✅ Booking ${updated.reference} rescheduled to ${updated.scheduledDate} at ${updated.scheduledTime}.`);
+    await whatsapp.sendText(session.phone, `✅ Booking ${updated.reference} has been rescheduled successfully for ${updated.scheduledDate} at ${updated.scheduledTime}.`);
   } catch (err) {
     logger.error('MY_BOOKINGS', 'rescheduleBooking failed:', err.message);
-    await whatsapp.sendText(session.phone, "Sorry, we couldn't reschedule that booking due to a system error. Please try again or type \"support\".");
+    await whatsapp.sendText(session.phone, "I'm sorry, I couldn't reschedule that booking because of a system error. Please try again, or type \"support\" to speak with our team.");
   }
 }
 

@@ -36,7 +36,7 @@ async function startComplaint(session, customer) {
   }));
   rows.push({ id: 'BKC_NONE', title: 'Not related to a booking', description: 'General complaint' });
 
-  await whatsapp.sendListMessage(session.phone, 'Is this complaint about a specific booking?', 'Choose booking', [
+  await whatsapp.sendListMessage(session.phone, "I'm sorry to hear about the issue. I'll help you register the complaint. Is it related to one of your recent bookings?", 'Choose booking', [
     { title: 'Recent Bookings', rows },
   ]);
   await sessionStore.setFlow(session.phone, FLOW, 'select_booking', {});
@@ -44,7 +44,7 @@ async function startComplaint(session, customer) {
 
 async function handleSelectBooking(session, customer, input) {
   if (!input.buttonId || !input.buttonId.startsWith('BKC_')) {
-    await whatsapp.sendText(session.phone, 'Please choose an option from the list above.');
+    await whatsapp.sendText(session.phone, 'Please select a booking from the list above, or select "Not related to a booking".');
     return;
   }
   const bookingId = input.buttonId === 'BKC_NONE' ? null : input.buttonId.replace('BKC_', '');
@@ -52,7 +52,7 @@ async function handleSelectBooking(session, customer, input) {
 }
 
 async function promptCategory(session, context) {
-  await whatsapp.sendListMessage(session.phone, 'What is this complaint about?', 'Choose category', [
+  await whatsapp.sendListMessage(session.phone, "I'll help you get this resolved. Please select the category that best describes the issue.", 'Choose category', [
     { title: 'Complaint Category', rows: CATEGORIES.map((c) => ({ id: `CAT_${c.id}`, title: c.title })) },
   ]);
   await sessionStore.setFlow(session.phone, FLOW, 'select_category', context);
@@ -60,14 +60,14 @@ async function promptCategory(session, context) {
 
 async function handleSelectCategory(session, customer, input) {
   if (!input.buttonId || !input.buttonId.startsWith('CAT_')) {
-    await whatsapp.sendText(session.phone, 'Please choose a category from the list above.');
+    await whatsapp.sendText(session.phone, 'Please select a complaint category from the list above.');
     return;
   }
   const category = input.buttonId.replace('CAT_', '');
   const context = { ...session.context, category, attachments: [] };
 
   if (category === 'other') {
-    await whatsapp.sendText(session.phone, 'Please describe the issue — you can type it or send a voice note.');
+    await whatsapp.sendText(session.phone, 'Thank you. Please describe the issue. You can type your message or send a voice note.');
     await sessionStore.setFlow(session.phone, FLOW, 'awaiting_details', context);
     return;
   }
@@ -77,14 +77,14 @@ async function handleSelectCategory(session, customer, input) {
 
 async function handleAwaitingDetails(session, customer, input) {
   if (!input.text || input.text.trim().length === 0) {
-    await whatsapp.sendText(session.phone, 'Please describe the issue in a message or voice note.');
+    await whatsapp.sendText(session.phone, 'Please describe the issue in a message or voice note so I can continue.');
     return;
   }
   await promptMedia(session, { ...session.context, description: input.text.trim() });
 }
 
 async function promptMedia(session, context) {
-  await whatsapp.sendButtons(session.phone, '📷 You can attach photos or videos of the issue. Send them now, or tap Skip.', [
+  await whatsapp.sendButtons(session.phone, '📷 If available, please send any photos or videos of the issue. Otherwise, select Skip / Done to continue.', [
     { id: 'MEDIA_DONE', title: 'Skip / Done' },
   ]);
   await sessionStore.setFlow(session.phone, FLOW, 'awaiting_media', context);
@@ -93,20 +93,21 @@ async function promptMedia(session, context) {
 async function handleAwaitingMedia(session, customer, input) {
   if (input.mediaId && ['image', 'video'].includes(input.mediaType)) {
     const attachments = [...(session.context.attachments || []), { waMediaId: input.mediaId, mediaType: input.mediaType }];
-    await whatsapp.sendText(session.phone, `Got it (${attachments.length} attachment${attachments.length > 1 ? 's' : ''}). Send more, or tap Skip/Done.`);
+    await whatsapp.sendText(session.phone, `Thank you. I've received ${attachments.length} attachment${attachments.length > 1 ? 's' : ''}. You may send more, or select Skip / Done to continue.`);
     await sessionStore.setFlow(session.phone, FLOW, 'awaiting_media', { ...session.context, attachments });
     return;
   }
 
   const isDone = input.buttonId === 'MEDIA_DONE' || (input.text && ['done', 'skip', 'no'].includes(input.text.trim().toLowerCase()));
   if (!isDone) {
-    await whatsapp.sendText(session.phone, 'Send a photo/video, or tap Skip/Done to continue.');
+    await whatsapp.sendText(session.phone, 'Please send a photo or video, or select Skip / Done to continue.');
     return;
   }
 
   const { category, description, bookingId, attachments = [] } = session.context;
-  const summary = `Category: ${category}${description ? `\nDetails: ${description}` : ''}\nAttachments: ${attachments.length}`;
-  await whatsapp.sendButtons(session.phone, `Please confirm this complaint:\n\n${summary}`, [
+  const categoryLabel = CATEGORIES.find((item) => item.id === category)?.title || category;
+  const summary = `Category: ${categoryLabel}${description ? `\nDetails: ${description}` : ''}\nAttachments: ${attachments.length}`;
+  await whatsapp.sendButtons(session.phone, `Please review your complaint details:\n\n${summary}`, [
     { id: 'CONFIRM_COMPLAINT', title: '✓ Submit' },
     { id: 'CANCEL_FLOW', title: '✗ Cancel' },
   ]);
@@ -116,18 +117,18 @@ async function handleAwaitingMedia(session, customer, input) {
 async function handleConfirm(session, customer, input) {
   if (input.buttonId === 'CANCEL_FLOW') {
     await sessionStore.clearFlow(session.phone);
-    await whatsapp.sendText(session.phone, 'No problem — complaint cancelled. Type "menu" anytime.');
+    await whatsapp.sendText(session.phone, 'Certainly. Your complaint request has been cancelled. Type "menu" if you need any further assistance.');
     return;
   }
   if (input.buttonId !== 'CONFIRM_COMPLAINT') {
-    await whatsapp.sendText(session.phone, 'Please tap Submit or Cancel.');
+    await whatsapp.sendText(session.phone, 'Please select Submit or Cancel to continue.');
     return;
   }
 
   const { category, description, bookingId, attachments = [] } = session.context;
   if (!category) {
     logger.error('COMPLAINT', 'Missing category at confirm step', session.context);
-    await whatsapp.sendText(session.phone, "Something went wrong — let's start over.");
+    await whatsapp.sendText(session.phone, 'I\'m sorry, some complaint details are missing, so I could not submit the request. Please type "menu" to start again.');
     await sessionStore.clearFlow(session.phone);
     return;
   }
@@ -143,7 +144,7 @@ async function handleConfirm(session, customer, input) {
     await sessionStore.clearFlow(session.phone);
     await whatsapp.sendText(
       session.phone,
-      `✅ Complaint registered.\n\nReference: *${complaint.reference}*\nOur team will follow up shortly. You can check status anytime from the main menu.`
+      `✅ Your complaint has been submitted successfully.\n\nReference: *${complaint.reference}*\nOur team will follow up with you shortly. You can check the status at any time from the main menu.`
     );
 
     const trigger = evaluateTriggers({ category });
@@ -158,7 +159,7 @@ async function handleConfirm(session, customer, input) {
     }
   } catch (err) {
     logger.error('COMPLAINT', 'createComplaint failed:', err.message);
-    await whatsapp.sendText(session.phone, "Sorry, we couldn't submit your complaint due to a system error. Please try again shortly, or type \"support\" to talk to our team.");
+    await whatsapp.sendText(session.phone, "I'm sorry, I couldn't submit your complaint because of a system error. Please try again shortly, or type \"support\" to speak with our team.");
   }
 }
 
