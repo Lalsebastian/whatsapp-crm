@@ -36,20 +36,42 @@ async function startBooking(session, customer) {
   await sessionStore.setFlow(session.phone, FLOW, 'select_service', {});
 }
 
+// Being inside this step shouldn't mean only button taps work — a customer
+// typing "ac service" or "enik ac service venam" instead of tapping the list
+// should still land on the right service. Whole-word category match first
+// (reliable for short codes like "ac"), then a same-language name substring.
+async function matchServiceByText(text, services) {
+  const lower = text.toLowerCase();
+  const byCategory = services.filter((s) => s.category && new RegExp(`\\b${s.category}\\b`, 'i').test(lower));
+  if (byCategory.length === 1) return byCategory[0];
+
+  const byName = services.filter((s) => lower.includes(s.name.toLowerCase()) || s.name.toLowerCase().includes(lower));
+  if (byName.length === 1) return byName[0];
+
+  return null;
+}
+
 async function handleSelectService(session, customer, input) {
-  if (!input.buttonId || !input.buttonId.startsWith('SVC_')) {
-    await whatsapp.sendText(session.phone, 'Please pick a service from the list above.');
-    return;
+  let service = null;
+
+  if (input.buttonId && input.buttonId.startsWith('SVC_')) {
+    service = await crm.getServiceDetails(input.buttonId.replace('SVC_', ''));
+  } else if (input.text) {
+    const services = await crm.getServices();
+    service = await matchServiceByText(input.text, services);
   }
-  const serviceId = input.buttonId.replace('SVC_', '');
-  const service = await crm.getServiceDetails(serviceId);
+
   if (!service) {
-    await whatsapp.sendText(session.phone, "Sorry, that service isn't available anymore. Please choose another.");
+    if (input.buttonId) {
+      await whatsapp.sendText(session.phone, "Sorry, that service isn't available anymore. Please choose another.");
+    } else {
+      await whatsapp.sendText(session.phone, "I couldn't match that to a service — please pick one from the list.");
+    }
     return startBooking(session, customer);
   }
 
   const properties = await crm.getCustomerProperties(customer.id);
-  const context = { serviceId };
+  const context = { serviceId: service.id };
 
   if (properties.length === 0) {
     await whatsapp.sendText(session.phone, '📍 Which address should we visit? Please type the full address.');

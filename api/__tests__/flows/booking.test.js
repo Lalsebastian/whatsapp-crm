@@ -79,4 +79,28 @@ describe('booking flow — select_service step', () => {
     expect(whatsapp.sendText).toHaveBeenCalled();
     expect(sessionStore.setFlow).toHaveBeenCalledWith('971500', 'booking', 'awaiting_new_property', { serviceId: 'svc1' });
   });
+
+  it('matches a service from free text by category, even mid-flow', async () => {
+    fakeCrm.getServices.mockResolvedValue([
+      { id: 'svc1', name: 'AC Service & Repair', category: 'ac', basePrice: 150 },
+      { id: 'svc2', name: 'Plumbing', category: 'plumbing', basePrice: 100 },
+    ]);
+    fakeCrm.getCustomerProperties.mockResolvedValue([]);
+
+    const session = { phone: '971500', context: {} };
+    await booking.steps.select_service(session, { id: 'cust1' }, { text: 'enik ac service venam' });
+
+    expect(sessionStore.setFlow).toHaveBeenCalledWith('971500', 'booking', 'awaiting_new_property', { serviceId: 'svc1' });
+  });
+
+  it('re-shows the service list when free text matches nothing', async () => {
+    fakeCrm.getServices.mockResolvedValue([{ id: 'svc1', name: 'AC Service & Repair', category: 'ac', basePrice: 150 }]);
+
+    const session = { phone: '971500', context: {} };
+    await booking.steps.select_service(session, { id: 'cust1' }, { text: 'what time do you close' });
+
+    expect(whatsapp.sendText).toHaveBeenCalledWith('971500', expect.stringContaining("couldn't match"));
+    expect(whatsapp.sendListMessage).toHaveBeenCalled();
+    expect(fakeCrm.getCustomerProperties).not.toHaveBeenCalled();
+  });
 });
