@@ -97,8 +97,16 @@ create table if not exists escalations (
   resolved_at timestamptz
 );
 
--- ── Extend existing sessions table (additive; legacy state/data columns
---    are left untouched so nothing breaks mid-migration) ──────────────────
+-- ── Sessions (conversation state per phone number) ──────────────────────
+-- Base shape matches the pre-refactor app's table; created here too so this
+-- script works whether or not that app's tables already exist in this project.
+create table if not exists sessions (
+  phone text primary key,
+  state text default 'IDLE',
+  data jsonb default '{}'::jsonb,
+  updated_at timestamptz default now()
+);
+
 alter table sessions add column if not exists customer_id uuid references customers(id);
 alter table sessions add column if not exists current_flow text;
 alter table sessions add column if not exists current_step text;
@@ -107,7 +115,15 @@ alter table sessions add column if not exists preferred_language text;
 alter table sessions add column if not exists human_takeover boolean default false;
 alter table sessions add column if not exists last_activity_at timestamptz default now();
 
--- ── Extend existing messages table (direction/intent bookkeeping) ────────
+-- ── Messages (inbound/outbound log, feeds the dashboard's Live Messages tab) ─
+create table if not exists messages (
+  id uuid primary key default gen_random_uuid(),
+  phone text not null,
+  type text,
+  content text,
+  created_at timestamptz default now()
+);
+
 alter table messages add column if not exists direction text default 'inbound' check (direction in ('inbound', 'outbound'));
 alter table messages add column if not exists wa_message_id text;
 alter table messages add column if not exists intent text;
