@@ -4,7 +4,9 @@
 const axios = require('axios');
 const env = require('../../config/env');
 
-const GEMINI_MODEL = 'gemini-2.0-flash';
+// gemini-2.0-flash was retired by Google; gemini-3.8-flash is its
+// replacement (per the deprecation error's own guidance).
+const GEMINI_MODEL = 'gemini-3.8-flash';
 
 async function callGemini(prompt) {
   if (!env.GEMINI_API_KEY) {
