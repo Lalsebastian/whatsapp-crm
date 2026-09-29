@@ -17,13 +17,21 @@
   .option-btn:hover { background: #1a2b4d; }
   form { display: flex; gap: 0.5rem; }
   input[type=text] { flex: 1; padding: 0.5rem; border-radius: 6px; border: 1px solid #444; background: #16181d; color: #eee; }
+  input[type=password] { width: 100%; box-sizing: border-box; margin-bottom: 0.5rem; padding: 0.5rem; border-radius: 6px; border: 1px solid #444; background: #16181d; color: #eee; }
   button[type=submit] { padding: 0.5rem 1rem; border-radius: 6px; border: none; background: #2563eb; color: white; cursor: pointer; }
+  button[type=submit]:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
   label { font-size: 0.8rem; opacity: 0.7; }
   .hint { font-size: 0.78rem; opacity: 0.55; margin: 0.4rem 0 1rem; }
+  #status { border-radius: 6px; padding: 0.6rem; margin-bottom: 0.8rem; background: #20242c; font-size: 0.85rem; }
+  #status.disabled { color: #fca5a5; }
+  #status.enabled { color: #86efac; }
 </style>
 </head>
 <body>
 <h1>Home Services Chatbot — Test Console</h1>
+<div id="status">Checking whether test chat is enabled…</div>
+<label for="secret">Developer secret</label>
+<input id="secret" type="password" autocomplete="current-password" placeholder="Enter TEST_CHAT_SECRET" />
 <label>Phone (any string, used as the customer's identity)</label>
 <input id="phone" type="text" value="971500000000" style="width:100%;margin-bottom:0.5rem;padding:0.5rem;border-radius:6px;border:1px solid #444;background:#16181d;color:#eee;" />
 <p class="hint">Type free text (e.g. "hi", "Nale AC service venam") or tap the buttons the bot sends — both drive the same conversation.</p>
@@ -38,6 +46,30 @@ const log = document.getElementById('log');
 const form = document.getElementById('form');
 const messageInput = document.getElementById('message');
 const phoneInput = document.getElementById('phone');
+const secretInput = document.getElementById('secret');
+const statusEl = document.getElementById('status');
+const submitButton = form.querySelector('button[type=submit]');
+
+function setAvailability(enabled, message) {
+  statusEl.textContent = message;
+  statusEl.className = enabled ? 'enabled' : 'disabled';
+  messageInput.disabled = !enabled;
+  submitButton.disabled = !enabled;
+}
+
+async function checkAvailability() {
+  try {
+    const res = await fetch('/api/chat/test/status', { cache: 'no-store' });
+    const data = await res.json();
+    if (res.ok && data.enabled) {
+      setAvailability(true, 'Test chat is enabled. Enter the developer secret to begin.');
+    } else {
+      setAvailability(false, 'Test chat is disabled on this deployment.');
+    }
+  } catch (err) {
+    setAvailability(false, 'Unable to check the test-chat status.');
+  }
+}
 
 function addMessage(who, body, meta, options) {
   const div = document.createElement('div');
@@ -81,18 +113,33 @@ function addMessage(who, body, meta, options) {
 async function sendMessage({ message, buttonId, label }) {
   const phone = phoneInput.value.trim();
   if (!phone) return;
+  const secret = secretInput.value;
+  if (!secret) {
+    addMessage('bot', 'Enter the developer secret before sending a test message.');
+    return;
+  }
 
   addMessage('user', label || message);
 
   try {
     const res = await fetch('/api/chat/test', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-test-chat-secret': secret,
+      },
       body: JSON.stringify(buttonId ? { phone, buttonId } : { phone, message }),
     });
     const data = await res.json();
     if (!res.ok) {
-      addMessage('bot', 'Error: ' + (data.detail || data.error || res.statusText));
+      if (data.code === 'TEST_CHAT_DISABLED') {
+        setAvailability(false, 'Test chat is disabled on this deployment.');
+        addMessage('bot', 'Test chat is disabled on this deployment.');
+      } else if (data.code === 'TEST_CHAT_UNAUTHORIZED') {
+        addMessage('bot', 'The developer secret is invalid.');
+      } else {
+        addMessage('bot', 'Error: ' + (data.detail || data.error || res.statusText));
+      }
       return;
     }
     let meta = 'intent=' + data.intent + ' flow=' + data.flow + ' step=' + data.step;
@@ -115,6 +162,8 @@ form.addEventListener('submit', (e) => {
   messageInput.value = '';
   sendMessage({ message });
 });
+
+checkAvailability();
 </script>
 </body>
 </html>

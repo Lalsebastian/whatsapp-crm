@@ -7,6 +7,10 @@ function firstDefined(names) {
   return undefined;
 }
 
+function booleanValue(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
 const env = {
   PORT: process.env.PORT || 3000,
   NODE_ENV: process.env.NODE_ENV || 'development',
@@ -29,6 +33,11 @@ const env = {
   CLIENT_API_BASE_URL: process.env.CLIENT_API_BASE_URL,
   CLIENT_API_KEY: process.env.CLIENT_API_KEY,
   CRM_PROVIDER: process.env.CRM_PROVIDER || 'supabase',
+
+  // Developer-only browser console. Both values are required, including in
+  // production, so enabling the flag without a secret fails closed.
+  ENABLE_TEST_CHAT: booleanValue(process.env.ENABLE_TEST_CHAT),
+  TEST_CHAT_SECRET: process.env.TEST_CHAT_SECRET || '',
 };
 
 module.exports = env;

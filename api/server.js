@@ -25,16 +25,10 @@ app.use('/webhook', webhookRoute);
 app.use('/health', healthRoute);
 app.use('/ready', readinessRoute);
 
-// The chat-test route drives the REAL conversationRouter, so leaving it mounted
-// in production lets anyone with the API URL inject fake inbound WhatsApp
-// messages for any phone number: create bookings, burn Gemini quota, and set
-// human_takeover on real customers (which silently mutes the bot). It exists
-// for local development only.
-if (env.NODE_ENV !== 'production') {
-  app.use('/api/chat/test', chatTestRoute);
-} else {
-  logger.log('SERVER', 'chatTest route disabled (NODE_ENV=production)');
-}
+// Always mount the route so the browser console can report a clear disabled
+// state. The route itself fails closed unless the explicit feature flag and
+// developer secret are both configured.
+app.use('/api/chat/test', chatTestRoute);
 
 app.get('/', (req, res) => {
   res.json({
@@ -43,7 +37,7 @@ app.get('/', (req, res) => {
       webhook: '/webhook',
       health: '/health',
       readiness: '/ready',
-      ...(env.NODE_ENV !== 'production' ? { chatTest: '/api/chat/test' } : {}),
+      ...(chatTestRoute.isTestChatEnabled() ? { chatTest: '/api/chat/test' } : {}),
     },
   });
 });
@@ -61,7 +55,12 @@ app.listen(env.PORT, () => {
   logger.log('SERVER', `Running on port ${env.PORT}`);
   logger.log('SERVER', `Health check: http://localhost:${env.PORT}/health`);
   logger.log('SERVER', `Webhook: http://localhost:${env.PORT}/webhook`);
-  logger.log('SERVER', `Test chat: http://localhost:${env.PORT}/api/chat/test`);
+  logger.log(
+    'SERVER',
+    chatTestRoute.isTestChatEnabled()
+      ? `Test chat enabled: http://localhost:${env.PORT}/test-chat.html`
+      : 'Test chat disabled (set ENABLE_TEST_CHAT=true and TEST_CHAT_SECRET to enable)'
+  );
 });
 
 // Keep-alive: ping self every 4 minutes to prevent Render free-tier spin-down.

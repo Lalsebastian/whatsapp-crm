@@ -70,7 +70,7 @@ describe('human takeover', () => {
     await handleInboundMessage({ from: '971500', type: 'text', text: 'menu', waMessageId: 'wamid-2' });
 
     // "menu" is a greeting/menu keyword — should trigger the main menu, which sends something.
-    expect(whatsapp.sendListMessage).toHaveBeenCalled();
+    expect(whatsapp.sendButtons).toHaveBeenCalled();
   });
 
   it('handles a greeting during an active flow without treating it as flow input', async () => {

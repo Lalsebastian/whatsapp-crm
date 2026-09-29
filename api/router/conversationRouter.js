@@ -23,8 +23,9 @@ const voiceConfig = require('../config/voice');
 
 const crm = getCrmAdapter();
 const MENU_KEYWORDS = ['menu', 'main menu', 'cancel', 'start', 'restart', 'start over', 'reset'];
-const SUPPORT_KEYWORDS = ['support', 'human', 'agent', 'talk to support', 'human agent'];
+const SUPPORT_KEYWORDS = ['support', 'human', 'agent', 'talk to support', 'human agent', 'i need support'];
 const GREETING_KEYWORDS = ['hi', 'hello', 'hey', 'hii', 'start', 'menu'];
+const SERVICE_INFO_KEYWORDS = ['services', 'service information', 'what services do you offer'];
 
 async function logMessage(phone, direction, type, content, extra = {}) {
   if (testChannel.isCapturing()) return; // /api/chat/test traffic shouldn't pollute real message history
@@ -113,8 +114,8 @@ async function route(session, customer, inbound) {
     return { reply: 'main_menu', intent: null, flow: 'main_menu', step: null };
   }
 
-  if (inbound.buttonId === 'TALK_TO_SUPPORT' || SUPPORT_KEYWORDS.includes(lowerText)) {
-    await entryPoints.TALK_TO_SUPPORT(session, customer, inbound);
+  if (['HUMAN_SUPPORT', 'TALK_TO_SUPPORT'].includes(inbound.buttonId) || SUPPORT_KEYWORDS.includes(lowerText)) {
+    await entryPoints.HUMAN_SUPPORT(session, customer, inbound);
     return { reply: 'escalated', intent: 'HUMAN_AGENT', flow: null, step: null };
   }
 
@@ -138,6 +139,11 @@ async function route(session, customer, inbound) {
         step: session.currentStep,
       };
     }
+  }
+
+  if (SERVICE_INFO_KEYWORDS.includes(lowerText)) {
+    await entryPoints.SERVICE_INFO(session, customer, inbound);
+    return { reply: 'handled', intent: 'GENERAL_QUERY', flow: 'SERVICE_INFO', step: null };
   }
 
   if (inbound.buttonId) {

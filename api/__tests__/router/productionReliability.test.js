@@ -52,7 +52,7 @@ describe('production conversation reliability', () => {
 
     expect(first.duplicate).not.toBe(true);
     expect(second.duplicate).toBe(true);
-    expect(whatsapp.sendListMessage).toHaveBeenCalledTimes(1);
+    expect(whatsapp.sendButtons).toHaveBeenCalledTimes(1);
     expect(crmAdapter.findCustomerByPhone).toHaveBeenCalledTimes(1);
   });
 
@@ -70,19 +70,19 @@ describe('production conversation reliability', () => {
   it('serializes concurrent messages for the same customer', async () => {
     sessionStore.getOrCreateSession.mockResolvedValue(idleSession());
     let releaseFirst;
-    whatsapp.sendListMessage
+    whatsapp.sendButtons
       .mockImplementationOnce(() => new Promise((resolve) => { releaseFirst = resolve; }))
       .mockResolvedValueOnce();
 
     const first = handleInboundMessage({ from: '971500', type: 'text', text: 'menu', waMessageId: 'wamid-lock-1', timestamp: '101' });
-    await vi.waitFor(() => expect(whatsapp.sendListMessage).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(whatsapp.sendButtons).toHaveBeenCalledTimes(1));
     const second = handleInboundMessage({ from: '971500', type: 'text', text: 'menu', waMessageId: 'wamid-lock-2', timestamp: '102' });
     await Promise.resolve();
-    expect(whatsapp.sendListMessage).toHaveBeenCalledTimes(1);
+    expect(whatsapp.sendButtons).toHaveBeenCalledTimes(1);
 
     releaseFirst();
     await Promise.all([first, second]);
-    expect(whatsapp.sendListMessage).toHaveBeenCalledTimes(2);
+    expect(whatsapp.sendButtons).toHaveBeenCalledTimes(2);
   });
 
   it('resets an expired active session and shows the main menu', async () => {
@@ -96,7 +96,7 @@ describe('production conversation reliability', () => {
 
     expect(result.reply).toBe('expired_session_menu');
     expect(whatsapp.sendText).toHaveBeenCalledWith('971500', expect.stringContaining('previous booking session has expired'));
-    expect(whatsapp.sendListMessage).toHaveBeenCalledTimes(1);
+    expect(whatsapp.sendButtons).toHaveBeenCalledTimes(1);
   });
 
   it('resumes a recent session instead of restarting it', async () => {
@@ -134,6 +134,6 @@ describe('production conversation reliability', () => {
     const stale = await handleInboundMessage({ from: '971500', type: 'text', text: 'menu', waMessageId: 'wamid-older', timestamp: '199' });
 
     expect(stale.stale).toBe(true);
-    expect(whatsapp.sendListMessage).toHaveBeenCalledTimes(1);
+    expect(whatsapp.sendButtons).toHaveBeenCalledTimes(1);
   });
 });

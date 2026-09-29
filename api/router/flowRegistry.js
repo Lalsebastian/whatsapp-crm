@@ -13,11 +13,14 @@ const support = require('../flows/support');
 // Entry points reachable from a main-menu tap or a mapped AI intent.
 const entryPoints = {
   MAIN_MENU: mainMenu.sendMainMenu,
+  MORE_OPTIONS: mainMenu.sendMoreOptions,
   BOOK_SERVICE: booking.startBooking,
   MY_BOOKINGS: myBookings.showMyBookings,
   MAKE_COMPLAINT: complaint.startComplaint,
   COMPLAINT_STATUS: complaintStatus.promptForReference,
   SERVICE_INFO: serviceInfo.showServiceInfo,
+  HUMAN_SUPPORT: support.startSupport,
+  // Backward-compatible alias for previously delivered list-message replies.
   TALK_TO_SUPPORT: support.startSupport,
 };
 

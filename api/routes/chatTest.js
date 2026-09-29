@@ -3,13 +3,50 @@
 // Outbound sends are captured (see whatsapp/testChannel.js) instead of
 // actually hitting the WhatsApp Graph API.
 const express = require('express');
+const crypto = require('crypto');
+const env = require('../config/env');
 const logger = require('../utils/logger');
 const { handleInboundMessage } = require('../router/conversationRouter');
 const testChannel = require('../whatsapp/testChannel');
 
 const router = express.Router();
 
-router.post('/', async (req, res) => {
+function isTestChatEnabled() {
+  return env.ENABLE_TEST_CHAT === true && Boolean(env.TEST_CHAT_SECRET);
+}
+
+function secretsMatch(provided, expected) {
+  if (!provided || !expected) return false;
+  const providedBuffer = Buffer.from(String(provided));
+  const expectedBuffer = Buffer.from(String(expected));
+  return providedBuffer.length === expectedBuffer.length
+    && crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+}
+
+function requireTestChatAccess(req, res, next) {
+  if (!isTestChatEnabled()) {
+    return res.status(404).json({
+      error: 'Test chat is disabled on this deployment.',
+      code: 'TEST_CHAT_DISABLED',
+    });
+  }
+
+  if (!secretsMatch(req.get('x-test-chat-secret'), env.TEST_CHAT_SECRET)) {
+    return res.status(401).json({
+      error: 'A valid developer secret is required.',
+      code: 'TEST_CHAT_UNAUTHORIZED',
+    });
+  }
+
+  return next();
+}
+
+router.get('/status', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ enabled: isTestChatEnabled(), requiresSecret: true });
+});
+
+router.post('/', requireTestChatAccess, async (req, res) => {
   const { phone, message, buttonId, voiceTranscript, voiceLanguage } = req.body || {};
   if (!phone || (!message && !buttonId && !voiceTranscript)) {
     return res.status(400).json({ error: 'Request body must include "phone" and a "message", "buttonId", or simulated "voiceTranscript".' });
@@ -66,3 +103,5 @@ router.post('/', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.isTestChatEnabled = isTestChatEnabled;
+module.exports.requireTestChatAccess = requireTestChatAccess;
