@@ -31,8 +31,14 @@ router.post('/', async (req, res) => {
       humanTakeover: !!result.humanTakeover,
     });
   } catch (err) {
-    logger.error('CHAT_TEST', 'handleInboundMessage failed:', err.message, err.stack);
-    res.status(500).json({ error: 'Internal error while processing test message', detail: err.message });
+    // err.response is present for failed axios calls (e.g. Supabase/PostgREST) —
+    // surface its real body here so this dev-only endpoint doesn't require
+    // digging through Render logs to see *why* something failed.
+    const detail = err.response
+      ? `Supabase ${err.response.status}: ${JSON.stringify(err.response.data)}`
+      : err.message;
+    logger.error('CHAT_TEST', 'handleInboundMessage failed:', detail, err.stack);
+    res.status(500).json({ error: 'Internal error while processing test message', detail });
   }
 });
 
