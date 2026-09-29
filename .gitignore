@@ -12,6 +12,16 @@ dist
 dist-ssr
 *.local
 
+# Secrets — only .env.example is committed. Covers the root .env (VITE_*) and
+# api/.env (GEMINI/WHATSAPP/SUPABASE_*).
+.env
+.env.*
+!.env.example
+api/.env
+api/.env.*
+!api/.env.example
+
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
