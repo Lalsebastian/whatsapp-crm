@@ -10,9 +10,28 @@ const { getCrmAdapter } = require('../crm');
 const { evaluateTriggers, triggerEscalation } = require('../escalation/escalationService');
 const { classifyComplaintCategory } = require('../ai/intentService');
 const AI_CONFIDENCE = require('../ai/confidence');
+const { randomUUID } = require('node:crypto');
+const { executeOnce } = require('../reliability/actionGuard');
 
 const crm = getCrmAdapter();
 const FLOW = 'complaint';
+
+function withVoiceEvidence(context, input) {
+  if (!input || !input.voice) return context;
+  const attachment = { waMediaId: input.voice.mediaId, mediaType: 'audio' };
+  const attachments = [...(context.attachments || [])];
+  if (!attachments.some((item) => item.waMediaId === attachment.waMediaId)) attachments.push(attachment);
+  const voiceNotes = [...(context.voiceNotes || [])];
+  if (!voiceNotes.some((item) => item.mediaId === input.voice.mediaId)) {
+    voiceNotes.push({
+      mediaId: input.voice.mediaId,
+      transcript: input.voice.transcript,
+      detectedLanguage: input.voice.detectedLanguage,
+      mimeType: input.voice.mimeType,
+    });
+  }
+  return { ...context, attachments, voiceNotes };
+}
 
 const CATEGORIES = [
   {
@@ -61,12 +80,25 @@ const CATEGORIES = [
 
 const CATEGORY_BY_ID = Object.fromEntries(CATEGORIES.map((category) => [category.id, category]));
 
-async function startComplaint(session, customer) {
+async function startComplaint(session, customer, input = {}) {
   logger.log('COMPLAINT_STARTED', { phone: session.phone });
+  let initialContext = withVoiceEvidence(
+    input.source === 'voice' ? { description: input.text && input.text.trim() } : {},
+    input
+  );
+  if (input.source === 'voice' && input.text) {
+    const classification = await classifyComplaintCategory(input.text, {
+      preferredLanguage: session.preferredLanguage,
+    });
+    if (classification.category && classification.confidence >= AI_CONFIDENCE.MEDIUM) {
+      initialContext = { ...initialContext, category: classification.category };
+    }
+  }
   const bookings = await crm.getBookings(customer.id, { limit: 5 });
 
   if (!bookings || bookings.length === 0) {
-    return promptCategory(session, {});
+    if (initialContext.category) return continueWithComplaintContext(session, initialContext);
+    return promptCategory(session, initialContext);
   }
 
   const rows = bookings.map((b) => ({
@@ -79,7 +111,7 @@ async function startComplaint(session, customer) {
   await whatsapp.sendListMessage(session.phone, "I'm sorry to hear about the issue. I'll help you register the complaint. Is it related to one of your recent bookings?", 'Choose booking', [
     { title: 'Recent Bookings', rows },
   ]);
-  await sessionStore.setFlow(session.phone, FLOW, 'select_booking', {});
+  await sessionStore.setFlow(session.phone, FLOW, 'select_booking', initialContext);
 }
 
 async function handleSelectBooking(session, customer, input) {
@@ -88,7 +120,16 @@ async function handleSelectBooking(session, customer, input) {
     return;
   }
   const bookingId = input.buttonId === 'BKC_NONE' ? null : input.buttonId.replace('BKC_', '');
-  await promptCategory(session, { bookingId });
+  const context = { ...session.context, bookingId };
+  if (context.category) return continueWithComplaintContext(session, context);
+  await promptCategory(session, context);
+}
+
+async function continueWithComplaintContext(session, context) {
+  const categoryConfig = CATEGORY_BY_ID[context.category];
+  if (!categoryConfig) return promptCategory(session, context);
+  await whatsapp.sendText(session.phone, categoryConfig.empathy);
+  await promptMedia(session, context);
 }
 
 async function promptCategory(session, context) {
@@ -119,7 +160,12 @@ async function handleSelectCategory(session, customer, input) {
     await whatsapp.sendText(session.phone, "I couldn't confidently identify the issue from your message. Please select the closest category from the list above.");
     return;
   }
-  const context = { ...session.context, category, description, attachments: [] };
+  const context = withVoiceEvidence({
+    ...session.context,
+    category,
+    description: description || session.context.description,
+    attachments: session.context.attachments || [],
+  }, input);
 
   const empathy = category === 'other' && description
     ? "Thank you for explaining what happened. I'll make sure the details are recorded properly."
@@ -139,7 +185,7 @@ async function handleAwaitingDetails(session, customer, input) {
     await whatsapp.sendText(session.phone, 'Please describe the issue in a message or voice note so I can continue.');
     return;
   }
-  await promptMedia(session, { ...session.context, description: input.text.trim() });
+  await promptMedia(session, withVoiceEvidence({ ...session.context, description: input.text.trim() }, input));
 }
 
 async function promptMedia(session, context) {
@@ -164,14 +210,21 @@ async function handleAwaitingMedia(session, customer, input) {
     return;
   }
 
-  const { category, description, bookingId, attachments = [] } = session.context;
+  const { category, description, bookingId, attachments = [], voiceNotes = [] } = session.context;
   const categoryLabel = CATEGORY_BY_ID[category]?.summaryLabel || 'Other issue';
   const summary = `Issue: ${categoryLabel}\nDetails: ${description || 'No additional details provided'}\nAttachments received: ${attachments.length}`;
   await whatsapp.sendButtons(session.phone, `Thank you. I've noted the details below. Please review them before I submit the complaint to our support team.\n\n${summary}`, [
     { id: 'CONFIRM_COMPLAINT', title: 'Submit Complaint' },
     { id: 'CANCEL_FLOW', title: 'Cancel Request' },
   ]);
-  await sessionStore.setFlow(session.phone, FLOW, 'confirm', { category, description, bookingId, attachments });
+  await sessionStore.setFlow(session.phone, FLOW, 'confirm', {
+    category,
+    description,
+    bookingId,
+    attachments,
+    voiceNotes,
+    submissionNonce: randomUUID(),
+  });
 }
 
 async function handleConfirm(session, customer, input) {
@@ -185,7 +238,7 @@ async function handleConfirm(session, customer, input) {
     return;
   }
 
-  const { category, description, bookingId, attachments = [] } = session.context;
+  const { category, description, bookingId, attachments = [], voiceNotes = [] } = session.context;
   if (!category) {
     logger.error('COMPLAINT', 'Missing category at confirm step', session.context);
     await whatsapp.sendText(session.phone, 'I\'m sorry, some complaint details are missing, so I could not submit the request. Please type "menu" to start again.');
@@ -193,20 +246,88 @@ async function handleConfirm(session, customer, input) {
     return;
   }
 
+  const submissionNonce = session.context.submissionNonce || randomUUID();
+  session.context.submissionNonce = submissionNonce;
+  const actionKey = `complaint:${customer.id}:${submissionNonce}`;
+  logger.audit('COMPLAINT_CREATE_REQUESTED', {
+    phone: session.phone,
+    customerId: customer.id,
+    sessionId: session.phone,
+    result: 'requested',
+    category,
+  });
   let complaint;
+  let duplicateSubmission = false;
   try {
-    complaint = await crm.createComplaint({
-      customerId: customer.id,
-      bookingId: bookingId || undefined,
-      category,
-      description,
-      attachments,
-    });
+    const outcome = await executeOnce(actionKey, () => crm.createComplaint({
+        customerId: customer.id,
+        bookingId: bookingId || undefined,
+        category,
+        description,
+        attachments,
+      }));
+    complaint = outcome.value;
+    duplicateSubmission = outcome.duplicate;
+    if (outcome.duplicate) {
+      logger.audit('COMPLAINT_DUPLICATE_BLOCKED', {
+        phone: session.phone,
+        customerId: customer.id,
+        sessionId: session.phone,
+        result: 'existing_result_returned',
+        complaintReference: complaint.reference,
+      });
+    }
+    if (!outcome.duplicate) {
+      logger.audit('COMPLAINT_CREATED', {
+        phone: session.phone,
+        customerId: customer.id,
+        sessionId: session.phone,
+        result: 'success',
+        complaintReference: complaint.reference,
+      });
+    }
     logger.log('COMPLAINT_CREATED', { phone: session.phone, reference: complaint.reference });
     await sessionStore.clearFlow(session.phone);
   } catch (err) {
     logger.error('COMPLAINT', 'createComplaint failed:', err.message);
+    logger.audit(err.duplicateBlocked ? 'COMPLAINT_DUPLICATE_BLOCKED' : 'COMPLAINT_CREATE_FAILED', {
+      phone: session.phone,
+      customerId: customer.id,
+      sessionId: session.phone,
+      result: err.uncertain ? 'uncertain' : 'failed',
+      reason: err.code || err.message,
+    });
+    if (err.uncertain) {
+      let escalated = false;
+      if (!err.duplicateBlocked) {
+        try {
+          await triggerEscalation({
+            crm,
+            phone: session.phone,
+            customerId: customer.id,
+            reason: 'complaint_creation_uncertain',
+            summary: 'A complaint creation request timed out. Please verify the CRM before resubmitting.',
+          });
+          escalated = true;
+        } catch (escalationError) {
+          logger.error('COMPLAINT', 'Uncertain complaint escalation failed:', escalationError.message);
+        }
+      }
+      const message = err.duplicateBlocked
+        ? 'Your complaint request is already being checked. Please wait for our support team before submitting it again.'
+        : `I'm sorry, I could not verify whether the complaint was registered. I have kept your details and ${escalated ? 'asked our support team to check the request' : 'recommend contacting support before submitting it again'} so that a duplicate complaint is not created.`;
+      await whatsapp.sendText(session.phone, message);
+      return;
+    }
     await whatsapp.sendText(session.phone, "I'm sorry, I wasn't able to register the complaint just now. Your details are still saved in this conversation. Please try again by selecting Submit Complaint, or type \"menu\" and choose Talk to Support.");
+    return;
+  }
+
+  if (duplicateSubmission) {
+    await whatsapp.sendText(
+      session.phone,
+      `Your complaint has already been registered. Reference: *${complaint.reference}*`
+    );
     return;
   }
 
@@ -219,7 +340,7 @@ async function handleConfirm(session, customer, input) {
         phone: session.phone,
         customerId: customer.id,
         reason: trigger.reason,
-        summary: `Complaint ${complaint.reference}: ${category}${description ? ` — ${description}` : ''}`,
+        summary: `Complaint ${complaint.reference}: ${category}${description ? ` — ${description}` : ''}${voiceNotes.length ? ` Voice notes: ${voiceNotes.map((note) => `${note.mediaId} (${note.detectedLanguage || 'language unknown'})`).join(', ')}` : ''}`,
       });
       priorityReview = true;
     } catch (err) {

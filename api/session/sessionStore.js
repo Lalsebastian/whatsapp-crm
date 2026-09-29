@@ -5,6 +5,7 @@
 // the legacy webhook.js wrote `state`/`data` but never read them back on
 // free-text replies, so flows never completed. sessionStore fixes that.
 const db = require('../db/supabaseClient');
+const reliability = require('../config/reliability');
 
 function mapSession(row) {
   return {
@@ -69,4 +70,11 @@ async function touchActivity(phone) {
   });
 }
 
-module.exports = { getOrCreateSession, updateSession, setFlow, clearFlow, setHumanTakeover, touchActivity };
+function isExpired(session, now = Date.now()) {
+  if (!session || session.humanTakeover || !session.currentFlow || !session.currentStep) return false;
+  const lastActivity = Date.parse(session.lastActivityAt);
+  if (!Number.isFinite(lastActivity)) return false;
+  return now - lastActivity > reliability.SESSION_TTL_MINUTES * 60 * 1000;
+}
+
+module.exports = { getOrCreateSession, updateSession, setFlow, clearFlow, setHumanTakeover, touchActivity, isExpired };

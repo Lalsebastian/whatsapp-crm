@@ -25,13 +25,19 @@ sessionStore.clearFlow = vi.fn();
 const intentService = require('../../ai/intentService');
 intentService.matchServiceToCatalog = vi.fn();
 
+const escalationService = require('../../escalation/escalationService');
+escalationService.triggerEscalation = vi.fn();
+
+const actionGuard = require('../../reliability/actionGuard');
+
 const booking = require('../../flows/booking');
 
 function resetAll() {
   [fakeCrm.getServices, fakeCrm.getServiceDetails, fakeCrm.getCustomerProperties, fakeCrm.addProperty, fakeCrm.getAvailability, fakeCrm.createBooking,
     whatsapp.sendText, whatsapp.sendButtons, whatsapp.sendListMessage, sessionStore.setFlow, sessionStore.clearFlow,
-    intentService.matchServiceToCatalog]
+    intentService.matchServiceToCatalog, escalationService.triggerEscalation]
     .forEach((fn) => fn.mockReset());
+  actionGuard.clearForTests();
   intentService.matchServiceToCatalog.mockResolvedValue({ serviceId: null, confidence: 0 });
 }
 
@@ -78,6 +84,44 @@ describe('booking flow — confirm step', () => {
 
     expect(whatsapp.sendText.mock.calls.at(-1)[1]).toContain("couldn't confirm your booking");
     expect(whatsapp.sendText.mock.calls.at(-1)[1]).not.toContain('is confirmed');
+    expect(sessionStore.clearFlow).not.toHaveBeenCalled();
+  });
+
+  it('creates only one CRM booking when confirmation is submitted twice concurrently', async () => {
+    fakeCrm.createBooking.mockResolvedValue({ reference: 'BK-ONCE', scheduledDate: '2026-10-01', scheduledTime: '09:00' });
+    const session = {
+      phone: '971500',
+      context: {
+        confirmationNonce: 'confirm-once',
+        cart: [{ actionId: 'item-once', serviceId: 'svc1', serviceName: 'Plumbing', propertyId: 'prop1', propertyLabel: 'Home', date: '2026-10-01', time: '09:00' }],
+      },
+    };
+
+    await Promise.all([
+      booking.steps.confirm(session, { id: 'cust1' }, { buttonId: 'CONFIRM_BOOKING' }),
+      booking.steps.confirm(session, { id: 'cust1' }, { buttonId: 'CONFIRM_BOOKING' }),
+    ]);
+
+    expect(fakeCrm.createBooking).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry an uncertain booking creation outcome', async () => {
+    const timeout = Object.assign(new Error('CRM.createBooking timed out'), { code: 'OPERATION_TIMEOUT', uncertain: true });
+    fakeCrm.createBooking.mockRejectedValue(timeout);
+    escalationService.triggerEscalation.mockResolvedValue({ id: 'esc1' });
+    const session = {
+      phone: '971500',
+      context: {
+        confirmationNonce: 'uncertain-confirm',
+        cart: [{ actionId: 'uncertain-item', serviceId: 'svc1', serviceName: 'Plumbing', propertyId: 'prop1', propertyLabel: 'Home', date: '2026-10-01', time: '09:00' }],
+      },
+    };
+
+    await booking.steps.confirm(session, { id: 'cust1' }, { buttonId: 'CONFIRM_BOOKING' });
+    await booking.steps.confirm(session, { id: 'cust1' }, { buttonId: 'CONFIRM_BOOKING' });
+
+    expect(fakeCrm.createBooking).toHaveBeenCalledTimes(1);
+    expect(whatsapp.sendText.mock.calls.at(-1)[1]).toContain('already being checked');
     expect(sessionStore.clearFlow).not.toHaveBeenCalled();
   });
 });
@@ -221,6 +265,47 @@ describe('booking flow — hybrid field collection', () => {
     expect(fakeCrm.getAvailability).not.toHaveBeenCalled();
     expect(sessionStore.setFlow).not.toHaveBeenCalled();
     expect(whatsapp.sendText).toHaveBeenCalledWith('971500', expect.stringContaining("couldn't identify that date"));
+  });
+
+  it('matches a saved property from a voice transcript', async () => {
+    await booking.steps.select_property(
+      {
+        phone: '971500',
+        context: {
+          serviceId: 'svc1', serviceName: 'Plumbing',
+          propertyOptions: { prop1: 'Kakkanad flat — Kakkanad, Kochi', prop2: 'Office — Dubai' },
+        },
+      },
+      { id: 'cust1' },
+      { text: 'My Kakkanad flat', source: 'voice', voice: { mediaId: 'voice-address' } }
+    );
+
+    expect(sessionStore.setFlow).toHaveBeenCalledWith(
+      '971500', 'booking', 'select_date',
+      expect.objectContaining({ propertyId: 'prop1', propertyLabel: 'Kakkanad flat — Kakkanad, Kochi' })
+    );
+  });
+
+  it('uses voice-extracted date and time while retaining CRM slot validation', async () => {
+    fakeCrm.getAvailability.mockResolvedValue(['09:00', '17:00']);
+    await booking.steps.select_date(
+      {
+        phone: '971500',
+        context: { serviceId: 'svc1', serviceName: 'Plumbing', propertyId: 'prop1', propertyLabel: 'Home' },
+      },
+      { id: 'cust1' },
+      {
+        text: 'day after tomorrow after five in the evening',
+        source: 'voice',
+        voice: { mediaId: 'voice-date-time' },
+        ai: { preferredDate: 'day after tomorrow', preferredTime: 'after five in the evening' },
+      }
+    );
+
+    expect(sessionStore.setFlow).toHaveBeenCalledWith(
+      '971500', 'booking', 'review_item',
+      expect.objectContaining({ time: '17:00', currentItem: expect.objectContaining({ time: '17:00' }) })
+    );
   });
 
   it('completes the button-driven path through review and explicit confirmation', async () => {

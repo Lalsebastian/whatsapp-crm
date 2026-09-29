@@ -20,6 +20,11 @@ function parseDateInput(text) {
     d.setDate(d.getDate() + 1);
     return formatDate(d);
   }
+  if (t === 'day after tomorrow' || t === 'the day after tomorrow') {
+    const d = new Date(today);
+    d.setDate(d.getDate() + 2);
+    return formatDate(d);
+  }
 
   let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (m) {

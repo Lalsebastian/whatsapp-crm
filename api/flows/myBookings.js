@@ -107,12 +107,34 @@ async function handleConfirmCancel(session, customer, input) {
     return;
   }
   try {
+    logger.audit('BOOKING_CANCEL_REQUESTED', {
+      phone: session.phone,
+      customerId: customer.id,
+      bookingReference: booking.reference,
+      result: 'requested',
+    });
     await crm.cancelBooking(booking.id);
+    logger.audit('BOOKING_CANCELLED', {
+      phone: session.phone,
+      customerId: customer.id,
+      bookingReference: booking.reference,
+      result: 'success',
+    });
     await sessionStore.clearFlow(session.phone);
     await whatsapp.sendText(session.phone, `Booking ${booking.reference} has been cancelled successfully.`);
   } catch (err) {
     logger.error('MY_BOOKINGS', 'cancelBooking failed:', err.message);
-    await whatsapp.sendText(session.phone, "I'm sorry, I couldn't cancel that booking because of a system error. Please try again, or type \"support\" to speak with our team.");
+    logger.audit('BOOKING_CANCEL_FAILED', {
+      phone: session.phone,
+      customerId: customer.id,
+      bookingReference: booking.reference,
+      result: err.uncertain ? 'uncertain' : 'failed',
+      reason: err.code || err.message,
+    });
+    const message = err.uncertain
+      ? `I'm sorry, I could not verify whether booking ${booking.reference} was cancelled. Please check its status or contact support before trying again.`
+      : "I'm sorry, I couldn't cancel that booking because of a system error. Please try again, or type \"support\" to speak with our team.";
+    await whatsapp.sendText(session.phone, message);
   }
 }
 
@@ -148,12 +170,34 @@ async function handleAwaitingRescheduleSlot(session, customer, input) {
   }
   const time = input.buttonId.replace('SLOT_', '');
   try {
+    logger.audit('BOOKING_RESCHEDULE_REQUESTED', {
+      phone: session.phone,
+      customerId: customer.id,
+      bookingReference: booking.reference,
+      result: 'requested',
+    });
     const updated = await crm.rescheduleBooking(booking.id, { date, time });
+    logger.audit('BOOKING_RESCHEDULED', {
+      phone: session.phone,
+      customerId: customer.id,
+      bookingReference: updated.reference,
+      result: 'success',
+    });
     await sessionStore.clearFlow(session.phone);
     await whatsapp.sendText(session.phone, `✅ Booking ${updated.reference} has been rescheduled for ${formatDateForCustomer(updated.scheduledDate)} at ${formatSlotForCustomer(updated.scheduledTime)}.`);
   } catch (err) {
     logger.error('MY_BOOKINGS', 'rescheduleBooking failed:', err.message);
-    await whatsapp.sendText(session.phone, "I'm sorry, I couldn't reschedule that booking because of a system error. Please try again, or type \"support\" to speak with our team.");
+    logger.audit('BOOKING_RESCHEDULE_FAILED', {
+      phone: session.phone,
+      customerId: customer.id,
+      bookingReference: booking.reference,
+      result: err.uncertain ? 'uncertain' : 'failed',
+      reason: err.code || err.message,
+    });
+    const message = err.uncertain
+      ? `I'm sorry, I could not verify whether booking ${booking.reference} was rescheduled. Please check its status or contact support before trying again.`
+      : "I'm sorry, I couldn't reschedule that booking because of a system error. Please try again, or type \"support\" to speak with our team.";
+    await whatsapp.sendText(session.phone, message);
   }
 }
 

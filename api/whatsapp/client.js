@@ -7,8 +7,15 @@ const env = require('../config/env');
 const logger = require('../utils/logger');
 const db = require('../db/supabaseClient');
 const testChannel = require('./testChannel');
+const reliability = require('../config/reliability');
+const { retry, isTransientError } = require('../reliability/asyncPolicy');
+const { CircuitBreaker } = require('../reliability/circuitBreaker');
 
 const GRAPH_BASE = 'https://graph.facebook.com/v19.0';
+const breaker = new CircuitBreaker('WhatsApp', {
+  failureThreshold: reliability.PROVIDER_FAILURE_THRESHOLD,
+  cooldownMs: reliability.PROVIDER_COOLDOWN_MS,
+});
 
 function messagesUrl() {
   return `${GRAPH_BASE}/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
@@ -24,8 +31,33 @@ function authHeaders() {
 // identical without this. Meta's actual error body says which one it is.
 async function post(payload) {
   try {
-    return await axios.post(messagesUrl(), payload, { headers: authHeaders() });
+    breaker.assertAvailable();
+    const response = await retry(
+      () => axios.post(messagesUrl(), payload, {
+        headers: authHeaders(),
+        timeout: reliability.WHATSAPP_REQUEST_TIMEOUT_MS,
+      }),
+      {
+        retries: reliability.WHATSAPP_MAX_RETRIES,
+        baseDelayMs: reliability.RETRY_BASE_DELAY_MS,
+        shouldRetry: isTransientError,
+        onRetry: ({ error, attempt, delayMs }) => logger.warn('WHATSAPP_RETRY', {
+          attempt,
+          delayMs,
+          reason: error.code || (error.response && error.response.status) || error.message,
+        }),
+      }
+    );
+    const messageId = response && response.data && response.data.messages && response.data.messages[0] && response.data.messages[0].id;
+    if (!messageId) {
+      const malformed = new Error('WhatsApp API returned a malformed success response');
+      malformed.code = 'WHATSAPP_MALFORMED_RESPONSE';
+      throw malformed;
+    }
+    breaker.recordSuccess();
+    return response;
   } catch (err) {
+    breaker.recordFailure();
     logger.error(
       'WHATSAPP',
       'Send failed:',
@@ -109,4 +141,4 @@ async function sendListMessage(to, bodyText, buttonText, sections) {
   return res;
 }
 
-module.exports = { sendText, sendButtons, sendListMessage };
+module.exports = { sendText, sendButtons, sendListMessage, post };

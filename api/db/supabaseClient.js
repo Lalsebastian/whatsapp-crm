@@ -1,13 +1,16 @@
 // Thin wrapper around Supabase's PostgREST REST API via axios.
-// No Supabase SDK is used, consistent with the rest of this project's dependency footprint.
+// No Supabase SDK is used, consistent with the rest of this project's dependency
+// footprint. Authenticates with the service-role key when present (see
+// config/env.js) so RLS can be enabled later without breaking the webhook.
 const axios = require('axios');
 const env = require('../config/env');
 const logger = require('../utils/logger');
+const reliability = require('../config/reliability');
 
 function headers(extra = {}) {
   return {
-    apikey: env.SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
+    apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
     ...extra,
   };
 }
@@ -23,7 +26,7 @@ function buildUrl(table, query) {
 // triggered it, so Render logs are enough to diagnose without guesswork.
 async function run(method, url, data, config) {
   try {
-    return await axios({ method, url, data, ...config });
+    return await axios({ method, url, data, timeout: reliability.CRM_REQUEST_TIMEOUT_MS, ...config });
   } catch (err) {
     logger.error(
       'SUPABASE',

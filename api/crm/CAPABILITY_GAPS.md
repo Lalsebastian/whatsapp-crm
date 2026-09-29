@@ -27,3 +27,31 @@ can be implemented safely:
 - **Real HTTP adapter:** `httpCrmAdapter.js` remains intentionally unimplemented
   until the client supplies endpoint paths, authentication, request schemas,
   response schemas, and error/idempotency behavior.
+
+## Production reliability limitations
+
+- Apply the additive `processed_webhook_events` definition in
+  `api/db/schema.sql` before deployment. Until that table exists, webhook
+  message-ID deduplication falls back to a single-process, 24-hour memory cache.
+- The CRM contract has no idempotency-key field or lookup-by-idempotency-key
+  endpoint. Booking and complaint double-submit protection is therefore
+  application-level and process-local; it cannot guarantee exactly-once writes
+  across multiple instances or a process restart.
+- Per-customer processing locks, out-of-order timestamp tracking, and provider
+  circuit breakers are process-local. Multi-instance deployment requires a
+  distributed lock/order store such as Postgres advisory locks or Redis.
+- A timed-out CRM write is treated as an uncertain outcome and is never
+  automatically retried. A CRM lookup by idempotency key is required for
+  automated reconciliation.
+
+## Voice-note retention and privacy
+
+- Voice bytes are downloaded into memory for transcription and are not written
+  to Render's filesystem or duplicated into Supabase storage.
+- Complaint records can retain the original WhatsApp media ID as an `audio`
+  attachment. Meta download URLs are short-lived, so durable playback for human
+  agents requires an approved storage and retention policy that the current CRM
+  contract does not provide.
+- Transcripts are handled like existing inbound message text and may be stored
+  in the message log or complaint description. Production policy should define
+  transcript retention, agent access, deletion, and customer privacy handling.

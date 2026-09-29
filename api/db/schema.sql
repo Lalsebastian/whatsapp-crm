@@ -128,6 +128,16 @@ alter table messages add column if not exists direction text default 'inbound' c
 alter table messages add column if not exists wa_message_id text;
 alter table messages add column if not exists intent text;
 
+-- WhatsApp retries webhook deliveries. The message ID is globally unique and
+-- acts as the durable claim before any conversation or CRM logic is executed.
+create table if not exists processed_webhook_events (
+  message_id text primary key,
+  phone text,
+  message_timestamp bigint,
+  correlation_id text,
+  processed_at timestamptz default now()
+);
+
 -- ── Disable Row Level Security on these operational tables ──────────────
 -- This backend is the only writer (one shared SUPABASE_ANON_KEY, not
 -- per-user Supabase auth), so per-row policies don't apply here — same
@@ -142,6 +152,7 @@ alter table bookings disable row level security;
 alter table complaints disable row level security;
 alter table media_attachments disable row level security;
 alter table escalations disable row level security;
+alter table processed_webhook_events disable row level security;
 
 -- ── Helpful indexes ──────────────────────────────────────────────────────
 create index if not exists idx_bookings_customer on bookings(customer_id);

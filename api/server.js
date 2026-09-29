@@ -6,6 +6,7 @@ const logger = require('./utils/logger');
 
 const webhookRoute = require('./routes/webhook');
 const healthRoute = require('./routes/health');
+const readinessRoute = require('./routes/readiness');
 const chatTestRoute = require('./routes/chatTest');
 
 const app = express();
@@ -22,12 +23,28 @@ app.use((req, res, next) => {
 
 app.use('/webhook', webhookRoute);
 app.use('/health', healthRoute);
-app.use('/api/chat/test', chatTestRoute);
+app.use('/ready', readinessRoute);
+
+// The chat-test route drives the REAL conversationRouter, so leaving it mounted
+// in production lets anyone with the API URL inject fake inbound WhatsApp
+// messages for any phone number: create bookings, burn Gemini quota, and set
+// human_takeover on real customers (which silently mutes the bot). It exists
+// for local development only.
+if (env.NODE_ENV !== 'production') {
+  app.use('/api/chat/test', chatTestRoute);
+} else {
+  logger.log('SERVER', 'chatTest route disabled (NODE_ENV=production)');
+}
 
 app.get('/', (req, res) => {
   res.json({
     message: 'Home Services WhatsApp Chatbot API',
-    endpoints: { webhook: '/webhook', health: '/health', chatTest: '/api/chat/test' },
+    endpoints: {
+      webhook: '/webhook',
+      health: '/health',
+      readiness: '/ready',
+      ...(env.NODE_ENV !== 'production' ? { chatTest: '/api/chat/test' } : {}),
+    },
   });
 });
 

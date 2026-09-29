@@ -20,4 +20,10 @@ describe('customer-facing date and slot formatting', () => {
     expect(parseDateInput('2026-02-30')).toBeNull();
     expect(parseDateInput('31/13/2026')).toBeNull();
   });
+
+  it('understands "day after tomorrow" for voice and text input', () => {
+    const expected = new Date();
+    expected.setDate(expected.getDate() + 2);
+    expect(parseDateInput('day after tomorrow')).toBe(expected.toISOString().slice(0, 10));
+  });
 });

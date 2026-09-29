@@ -26,6 +26,8 @@ escalationService.triggerEscalation = vi.fn();
 const intentService = require('../../ai/intentService');
 intentService.classifyComplaintCategory = vi.fn();
 
+const actionGuard = require('../../reliability/actionGuard');
+
 const complaint = require('../../flows/complaint');
 
 function resetAll() {
@@ -34,6 +36,7 @@ function resetAll() {
     .forEach((fn) => fn.mockReset());
   escalationService.evaluateTriggers.mockReset().mockReturnValue({ escalate: false, reason: null });
   intentService.classifyComplaintCategory.mockResolvedValue({ category: null, confidence: 0 });
+  actionGuard.clearForTests();
 }
 
 describe('complaint flow', () => {
@@ -189,6 +192,21 @@ describe('complaint flow', () => {
     expect(message).toContain('details are still saved in this conversation');
     expect(message).not.toContain("I've registered your complaint");
     expect(sessionStore.clearFlow).not.toHaveBeenCalled();
+  });
+
+  it('creates only one CRM complaint when submission is repeated concurrently', async () => {
+    fakeCrm.createComplaint.mockResolvedValue({ reference: 'CM-ONCE', id: 'c-once' });
+    const session = {
+      phone: '971500',
+      context: { submissionNonce: 'complaint-once', category: 'other', description: 'leak', attachments: [] },
+    };
+
+    await Promise.all([
+      complaint.steps.confirm(session, { id: 'cust1' }, { buttonId: 'CONFIRM_COMPLAINT' }),
+      complaint.steps.confirm(session, { id: 'cust1' }, { buttonId: 'CONFIRM_COMPLAINT' }),
+    ]);
+
+    expect(fakeCrm.createComplaint).toHaveBeenCalledTimes(1);
   });
 
   it('does not call createComplaint when the customer cancels', async () => {

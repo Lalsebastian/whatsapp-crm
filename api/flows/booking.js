@@ -9,6 +9,9 @@ const { parseDateInput, formatDateForCustomer, formatSlotForCustomer } = require
 const { matchServiceToCatalog } = require('../ai/intentService');
 const AI_CONFIDENCE = require('../ai/confidence');
 const { getCrmAdapter } = require('../crm');
+const { randomUUID } = require('node:crypto');
+const { executeOnce } = require('../reliability/actionGuard');
+const { triggerEscalation } = require('../escalation/escalationService');
 
 const crm = getCrmAdapter();
 const FLOW = 'booking';
@@ -53,6 +56,24 @@ function selectPreferredSlot(preference, slots) {
     String(slot).toLowerCase() === wanted || formatSlotForCustomer(slot).toLowerCase() === wanted
   );
   if (exact.length === 1) return exact[0];
+  const clock = wanted.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/);
+  if (clock) {
+    let requestedHour = Number(clock[1]);
+    const requestedMinute = Number(clock[2] || 0);
+    const period = clock[3] || (/evening|night|shaam|vaikunneram/.test(wanted) ? 'pm' : null);
+    if (period === 'pm' && requestedHour < 12) requestedHour += 12;
+    if (period === 'am' && requestedHour === 12) requestedHour = 0;
+    const requestedTotal = requestedHour * 60 + requestedMinute;
+    const candidates = slots
+      .map((slot) => {
+        const match = String(slot).match(/^(\d{1,2}):(\d{2})/);
+        return match ? { slot, total: Number(match[1]) * 60 + Number(match[2]) } : null;
+      })
+      .filter(Boolean)
+      .filter((entry) => /\bafter\b/.test(wanted) ? entry.total >= requestedTotal : entry.total === requestedTotal)
+      .sort((a, b) => a.total - b.total);
+    if (candidates.length > 0) return candidates[0].slot;
+  }
   const periodMatches = slots.filter((slot) => {
     const hourMatch = String(slot).match(/^(\d{1,2}):/);
     if (!hourMatch) return false;
@@ -72,6 +93,7 @@ function aiPrefill(input = {}) {
     locationHint: ai.locationHint || null,
     date: parseDateInput(ai.preferredDate),
     preferredTime: ai.preferredTime || null,
+    voiceNotes: input.voice ? [input.voice] : [],
     cart: [],
   };
 }
@@ -168,19 +190,22 @@ async function continueWithService(session, customer, service, priorContext = {}
 
 async function handleSelectService(session, customer, input) {
   const services = await crm.getServices();
+  const voiceContext = input.voice
+    ? { ...session.context, voiceNotes: [...(session.context.voiceNotes || []), input.voice] }
+    : session.context;
   if (input.buttonId && input.buttonId.startsWith('SVC_')) {
     const service = await crm.getServiceDetails(input.buttonId.replace('SVC_', ''));
-    if (service) return continueWithService(session, customer, service, session.context);
+    if (service) return continueWithService(session, customer, service, voiceContext);
   } else if (input.text) {
     const deterministic = matchServiceByText(input.text, services);
     if (deterministic) {
-      return continueWithService(session, customer, deterministic, session.context);
+      return continueWithService(session, customer, deterministic, voiceContext);
     }
     const semantic = await resolveSemanticService(session, input.text, services);
     if (semantic) {
       return promptServiceConfirmation(session, semantic.service, {
-        ...session.context,
-        issue: session.context.issue || input.text.trim(),
+        ...voiceContext,
+        issue: voiceContext.issue || input.text.trim(),
         aiServiceConfidence: semantic.confidence,
       });
     }
@@ -189,7 +214,7 @@ async function handleSelectService(session, customer, input) {
   const message = input.buttonId
     ? "I'm sorry, that service is no longer available. Please select another service."
     : "I couldn't confidently match that request to an available service. Please select the closest option below.";
-  await promptServiceList(session, services, session.context, message);
+  await promptServiceList(session, services, voiceContext, message);
 }
 
 async function handleConfirmService(session, customer, input) {
@@ -216,13 +241,23 @@ async function handleSelectProperty(session, customer, input) {
     await sessionStore.setFlow(session.phone, FLOW, 'awaiting_new_property', session.context);
     return;
   }
-  if (!input.buttonId || !input.buttonId.startsWith('PROP_')) {
+  let propertyId = input.buttonId && input.buttonId.startsWith('PROP_')
+    ? input.buttonId.replace('PROP_', '')
+    : null;
+  if (!propertyId && input.text) {
+    const words = input.text.toLowerCase().split(/\W+/).filter((word) => word.length > 2 && !['the', 'my', 'address'].includes(word));
+    const matches = Object.entries(session.context.propertyOptions || {}).filter(([, label]) =>
+      words.length > 0 && words.every((word) => String(label).toLowerCase().includes(word))
+    );
+    if (matches.length === 1) propertyId = matches[0][0];
+  }
+  if (!propertyId) {
     await whatsapp.sendText(session.phone, 'Please select a saved address or choose Use Another Address.');
     return;
   }
-  const propertyId = input.buttonId.replace('PROP_', '');
   await advanceAfterProperty(session, {
     ...session.context,
+    voiceNotes: input.voice ? [...(session.context.voiceNotes || []), input.voice] : session.context.voiceNotes,
     propertyId,
     propertyLabel: session.context.propertyOptions && session.context.propertyOptions[propertyId],
     propertyOptions: undefined,
@@ -272,27 +307,45 @@ async function showAvailability(session, context, date) {
       title: formatSlotForCustomer(slot),
     })) },
   ]);
-  await sessionStore.setFlow(session.phone, FLOW, 'select_slot', { ...context, date });
+  await sessionStore.setFlow(session.phone, FLOW, 'select_slot', { ...context, date, availableSlots: slots });
 }
 
 async function handleSelectDate(session, customer, input) {
   let date = null;
   if (input.buttonId === 'DATE_TODAY') date = parseDateInput('today');
   else if (input.buttonId === 'DATE_TOMORROW') date = parseDateInput('tomorrow');
-  else if (input.text) date = parseDateInput(input.text);
+  else if (input.text) date = parseDateInput(input.ai && input.ai.preferredDate) || parseDateInput(input.text);
   if (!date) {
     await whatsapp.sendText(session.phone, "I couldn't identify that date. Please enter it in YYYY-MM-DD format, or select Today or Tomorrow.");
     return;
   }
-  await showAvailability(session, session.context, date);
+  await showAvailability(session, {
+    ...session.context,
+    voiceNotes: input.voice ? [...(session.context.voiceNotes || []), input.voice] : session.context.voiceNotes,
+    preferredTime: (input.ai && input.ai.preferredTime) || session.context.preferredTime,
+  }, date);
 }
 
 async function handleSelectSlot(session, customer, input) {
-  if (!input.buttonId || !input.buttonId.startsWith('SLOT_')) {
+  let time = input.buttonId && input.buttonId.startsWith('SLOT_')
+    ? input.buttonId.replace('SLOT_', '')
+    : null;
+  if (!time && input.text) {
+    time = selectPreferredSlot(
+      (input.ai && input.ai.preferredTime) || input.text,
+      session.context.availableSlots || []
+    );
+  }
+  if (!time) {
     await whatsapp.sendText(session.phone, 'Please select one of the available times from the list above.');
     return;
   }
-  await promptItemReview(session, { ...session.context, time: input.buttonId.replace('SLOT_', '') });
+  const { availableSlots, ...context } = session.context;
+  await promptItemReview(session, {
+    ...context,
+    time,
+    voiceNotes: input.voice ? [...(context.voiceNotes || []), input.voice] : context.voiceNotes,
+  });
 }
 
 async function promptItemReview(session, context) {
@@ -392,19 +445,21 @@ async function handleChangeDetails(session, customer, input) {
 }
 
 async function promptFinalConfirmation(session, cart) {
-  const lines = cart.map((item, index) =>
-    `${cart.length > 1 ? `${index + 1}. ` : ''}${item.serviceName}\n📍 ${item.propertyLabel}\n📅 ${formatDateForCustomer(item.date)}\n🕙 ${formatSlotForCustomer(item.time)}`
+  const preparedCart = cart.map((item) => ({ ...item, actionId: item.actionId || randomUUID() }));
+  const confirmationNonce = randomUUID();
+  const lines = preparedCart.map((item, index) =>
+    `${preparedCart.length > 1 ? `${index + 1}. ` : ''}${item.serviceName}\n📍 ${item.propertyLabel}\n📅 ${formatDateForCustomer(item.date)}\n🕙 ${formatSlotForCustomer(item.time)}`
   );
   await whatsapp.sendButtons(
     session.phone,
-    `Everything is ready.\n\n${lines.join('\n\n')}\n\nShall I confirm ${cart.length > 1 ? 'these bookings' : 'the booking'}?`,
+    `Everything is ready.\n\n${lines.join('\n\n')}\n\nShall I confirm ${preparedCart.length > 1 ? 'these bookings' : 'the booking'}?`,
     [
       { id: 'CONFIRM_BOOKING', title: 'Confirm Booking' },
       { id: 'CHANGE_BOOKING_DETAILS', title: 'Change Details' },
       { id: 'CANCEL_FLOW', title: 'Cancel' },
     ]
   );
-  await sessionStore.setFlow(session.phone, FLOW, 'confirm', { cart });
+  await sessionStore.setFlow(session.phone, FLOW, 'confirm', { cart: preparedCart, confirmationNonce });
 }
 
 async function handleConfirm(session, customer, input) {
@@ -433,6 +488,11 @@ async function handleConfirm(session, customer, input) {
     issue: session.context.issue,
   };
   const cart = session.context.cart && session.context.cart.length ? session.context.cart : [fallbackItem];
+  const confirmationNonce = session.context.confirmationNonce || randomUUID();
+  session.context.confirmationNonce = confirmationNonce;
+  cart.forEach((item) => {
+    if (!item.actionId) item.actionId = randomUUID();
+  });
   if (cart.some((item) => !item.serviceId || !item.propertyId || !item.date || !item.time)) {
     logger.error('BOOKING', 'Missing required fields at confirm step', session.context);
     await whatsapp.sendText(session.phone, 'I\'m sorry, some booking details are missing, so I could not complete the request. Please type "menu" to start again.');
@@ -451,8 +511,34 @@ async function handleConfirm(session, customer, input) {
       time: item.time,
     };
     if (item.issue) payload.notes = item.issue;
+    const actionKey = `booking:${customer.id}:${confirmationNonce}:${item.actionId}`;
+    logger.audit('BOOKING_CREATE_REQUESTED', {
+      phone: session.phone,
+      customerId: customer.id,
+      sessionId: session.phone,
+      result: 'requested',
+      serviceId: item.serviceId,
+    });
     try {
-      const booking = await crm.createBooking(payload);
+      const { value: booking, duplicate } = await executeOnce(actionKey, () => crm.createBooking(payload));
+      if (duplicate) {
+        logger.audit('BOOKING_DUPLICATE_BLOCKED', {
+          phone: session.phone,
+          customerId: customer.id,
+          sessionId: session.phone,
+          result: 'existing_result_returned',
+          bookingReference: booking.reference,
+        });
+      }
+      if (!duplicate) {
+        logger.audit('BOOKING_CREATED', {
+          phone: session.phone,
+          customerId: customer.id,
+          sessionId: session.phone,
+          result: 'success',
+          bookingReference: booking.reference,
+        });
+      }
       let serviceName = item.serviceName;
       if (!serviceName) {
         const service = await crm.getServiceDetails(item.serviceId);
@@ -461,10 +547,39 @@ async function handleConfirm(session, customer, input) {
       confirmed.push({ ...booking, serviceName, requestedDate: item.date, requestedTime: item.time });
     } catch (err) {
       logger.error('BOOKING', 'createBooking failed:', err.message);
+      logger.audit(err.duplicateBlocked ? 'BOOKING_DUPLICATE_BLOCKED' : 'BOOKING_CREATE_FAILED', {
+        phone: session.phone,
+        customerId: customer.id,
+        sessionId: session.phone,
+        result: err.uncertain ? 'uncertain' : 'failed',
+        reason: err.code || err.message,
+      });
+      if (err.uncertain) {
+        let escalated = false;
+        if (!err.duplicateBlocked) {
+          try {
+            await triggerEscalation({
+              crm,
+              phone: session.phone,
+              customerId: customer.id,
+              reason: 'booking_creation_uncertain',
+              summary: 'A booking creation request timed out. Please verify the CRM before retrying.',
+            });
+            escalated = true;
+          } catch (escalationError) {
+            logger.error('BOOKING', 'Uncertain booking escalation failed:', escalationError.message);
+          }
+        }
+        const message = err.duplicateBlocked
+          ? 'Your booking request is already being checked. Please wait for our support team before trying again.'
+          : `I'm sorry, I could not verify whether the booking was completed. I have kept your details and ${escalated ? 'asked our support team to check the request' : 'recommend contacting support before trying again'} so that a duplicate booking is not created.`;
+        await whatsapp.sendText(session.phone, message);
+        return;
+      }
       if (confirmed.length === 0) {
         await whatsapp.sendText(session.phone, "I'm sorry, I couldn't confirm your booking because of a system error. Your booking details are still saved, so you can try Confirm Booking again.");
       } else {
-        await sessionStore.setFlow(session.phone, FLOW, 'confirm', { cart: cart.slice(index) });
+        await sessionStore.setFlow(session.phone, FLOW, 'confirm', { cart: cart.slice(index), confirmationNonce });
         const references = confirmed.map((booking) => booking.reference).join(', ');
         await whatsapp.sendText(session.phone, `I confirmed ${confirmed.length} service${confirmed.length > 1 ? 's' : ''} (${references}), but I could not confirm the remaining service${cart.length - index > 1 ? 's' : ''}. The remaining details are still saved; please try again or type "support".`);
       }

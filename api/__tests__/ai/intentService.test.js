@@ -47,6 +47,14 @@ describe('detectIntent', () => {
     expect(result.confidence).toBe(0);
   });
 
+  it('falls back to UNKNOWN when the AI provider times out', async () => {
+    const timeout = Object.assign(new Error('timeout'), { code: 'ECONNABORTED' });
+    callGemini.mockRejectedValueOnce(timeout);
+    const result = await detectIntent('light not working');
+    expect(result.intent).toBe('UNKNOWN');
+    expect(result.confidence).toBe(0);
+  });
+
   it('clamps an out-of-range confidence into [0,1]', async () => {
     callGemini.mockResolvedValueOnce(JSON.stringify({ intent: 'GENERAL_QUERY', confidence: 5 }));
     const result = await detectIntent('hi');

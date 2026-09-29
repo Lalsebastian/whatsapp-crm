@@ -19,6 +19,10 @@ const env = {
 
   SUPABASE_URL: process.env.SUPABASE_URL,
   SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
+  // Server-side only. Preferred for all bot DB access so that enabling RLS
+  // later can't lock the webhook out of its own tables. Falls back to the anon
+  // key until the service-role secret is added to Render.
+  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY,
 
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
 

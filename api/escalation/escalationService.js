@@ -45,9 +45,29 @@ function evaluateTriggers({ text = '', intent, confidence, category, repeatedCom
 }
 
 async function triggerEscalation({ crm, phone, customerId, reason, summary }) {
-  await crm.escalateToHuman({ customerId, phone, reason, summary });
-  await sessionStore.setHumanTakeover(phone, true);
-  logger.log('HUMAN_ESCALATION', { phone, reason });
+  logger.audit('ESCALATION_REQUESTED', { phone, customerId, reason, result: 'requested' });
+  try {
+    const escalation = await crm.escalateToHuman({ customerId, phone, reason, summary });
+    await sessionStore.setHumanTakeover(phone, true);
+    logger.audit('ESCALATION_CREATED', {
+      phone,
+      customerId,
+      reason,
+      result: 'success',
+      escalationId: escalation && escalation.id,
+    });
+    logger.log('HUMAN_ESCALATION', { phone, reason });
+    return escalation;
+  } catch (error) {
+    logger.audit('ESCALATION_FAILED', {
+      phone,
+      customerId,
+      reason,
+      result: error.uncertain ? 'uncertain' : 'failed',
+      error: error.code || error.message,
+    });
+    throw error;
+  }
 }
 
 module.exports = { evaluateTriggers, triggerEscalation, isStruggling };

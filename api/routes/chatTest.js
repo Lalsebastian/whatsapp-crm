@@ -10,15 +10,35 @@ const testChannel = require('../whatsapp/testChannel');
 const router = express.Router();
 
 router.post('/', async (req, res) => {
-  const { phone, message, buttonId } = req.body || {};
-  if (!phone || (!message && !buttonId)) {
-    return res.status(400).json({ error: 'Request body must include "phone" and either "message" or "buttonId".' });
+  const { phone, message, buttonId, voiceTranscript, voiceLanguage } = req.body || {};
+  if (!phone || (!message && !buttonId && !voiceTranscript)) {
+    return res.status(400).json({ error: 'Request body must include "phone" and a "message", "buttonId", or simulated "voiceTranscript".' });
   }
 
   try {
-    const inbound = buttonId
-      ? { from: phone, type: 'interactive', buttonId }
-      : { from: phone, type: 'text', text: String(message) };
+    let inbound;
+    if (buttonId) {
+      inbound = { from: phone, type: 'interactive', buttonId };
+    } else if (voiceTranscript) {
+      const transcript = String(voiceTranscript).trim();
+      inbound = {
+        from: phone,
+        type: 'text',
+        text: transcript,
+        source: 'voice',
+        voice: {
+          source: 'voice',
+          transcript,
+          detectedLanguage: voiceLanguage || null,
+          confidence: 1,
+          provider: 'simulated',
+          mediaId: 'test-voice-media',
+          mimeType: 'audio/ogg',
+        },
+      };
+    } else {
+      inbound = { from: phone, type: 'text', text: String(message) };
+    }
 
     const { result, messages } = await testChannel.withCapture(() => handleInboundMessage(inbound));
 
