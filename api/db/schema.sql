@@ -128,6 +128,21 @@ alter table messages add column if not exists direction text default 'inbound' c
 alter table messages add column if not exists wa_message_id text;
 alter table messages add column if not exists intent text;
 
+-- ── Disable Row Level Security on these operational tables ──────────────
+-- This backend is the only writer (one shared SUPABASE_ANON_KEY, not
+-- per-user Supabase auth), so per-row policies don't apply here — same
+-- trust model the pre-existing sessions/messages tables already used.
+-- Some Supabase projects default newly-created tables to RLS-enabled with
+-- zero policies, which silently empties SELECTs and outright rejects
+-- INSERT/UPDATE (Postgres error 42501) — this line prevents that.
+alter table customers disable row level security;
+alter table properties disable row level security;
+alter table services disable row level security;
+alter table bookings disable row level security;
+alter table complaints disable row level security;
+alter table media_attachments disable row level security;
+alter table escalations disable row level security;
+
 -- ── Helpful indexes ──────────────────────────────────────────────────────
 create index if not exists idx_bookings_customer on bookings(customer_id);
 create index if not exists idx_complaints_customer on complaints(customer_id);
