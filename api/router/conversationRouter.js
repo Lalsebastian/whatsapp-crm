@@ -172,7 +172,7 @@ async function routeFreeText(session, customer, inbound) {
   if (!entryKey) {
     await whatsapp.sendText(session.phone, "I'm not sure I understood that. Here's what I can help with:");
     await entryPoints.MAIN_MENU(session, customer, inbound);
-    return { reply: 'unknown_fallback_menu', intent: intentResult.intent, flow: 'main_menu', step: null };
+    return { reply: 'unknown_fallback_menu', intent: intentResult.intent, flow: 'main_menu', step: null, debugReason: intentResult.debugReason };
   }
 
   await entryPoints[entryKey](session, customer, inbound);

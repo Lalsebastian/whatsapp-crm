@@ -29,6 +29,7 @@ router.post('/', async (req, res) => {
       flow: result.flow || null,
       step: result.step || null,
       humanTakeover: !!result.humanTakeover,
+      debugReason: result.debugReason || null,
     });
   } catch (err) {
     // err.response is present for failed axios calls (e.g. Supabase/PostgREST) —

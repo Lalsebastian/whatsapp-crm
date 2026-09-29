@@ -44,13 +44,16 @@ async function detectIntent(text, context = {}) {
     const parsed = safeParseJson(raw);
     const validated = validate(parsed);
     if (!validated) {
-      logger.warn('AI', 'Unparseable/invalid intent response — falling back to UNKNOWN');
-      return { ...UNKNOWN_RESULT };
+      logger.warn('AI', 'Unparseable/invalid intent response — falling back to UNKNOWN:', raw);
+      // debugReason is extra, dev-only diagnostic info — surfaced by
+      // /api/chat/test, never sent to a real WhatsApp customer.
+      return { ...UNKNOWN_RESULT, debugReason: `Unparseable response from model: ${String(raw).slice(0, 300)}` };
     }
     return validated;
   } catch (err) {
-    logger.error('AI', 'Intent detection failed:', err.message);
-    return { ...UNKNOWN_RESULT };
+    const detail = err.response ? `Gemini ${err.response.status}: ${JSON.stringify(err.response.data)}` : err.message;
+    logger.error('AI', 'Intent detection failed:', detail);
+    return { ...UNKNOWN_RESULT, debugReason: detail };
   }
 }
 

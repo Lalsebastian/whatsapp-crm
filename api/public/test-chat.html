@@ -11,7 +11,7 @@
   .msg .who { font-size: 0.75rem; opacity: 0.6; }
   .msg.user .body { color: #8ab4f8; }
   .msg.bot .body { white-space: pre-wrap; }
-  .meta { font-size: 0.7rem; opacity: 0.5; margin-top: 2px; }
+  .meta { font-size: 0.7rem; opacity: 0.5; margin-top: 2px; white-space: pre-wrap; }
   .options { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
   .option-btn { padding: 0.35rem 0.7rem; border-radius: 999px; border: 1px solid #2563eb; background: transparent; color: #8ab4f8; cursor: pointer; font-size: 0.85rem; }
   .option-btn:hover { background: #1a2b4d; }
@@ -95,10 +95,12 @@ async function sendMessage({ message, buttonId, label }) {
       addMessage('bot', 'Error: ' + (data.detail || data.error || res.statusText));
       return;
     }
+    let meta = 'intent=' + data.intent + ' flow=' + data.flow + ' step=' + data.step;
+    if (data.debugReason) meta += '\nwhy UNKNOWN: ' + data.debugReason;
     addMessage(
       'bot',
       data.reply || (data.humanTakeover ? '(human takeover active — bot is silent)' : '(no reply)'),
-      'intent=' + data.intent + ' flow=' + data.flow + ' step=' + data.step,
+      meta,
       data.options
     );
   } catch (err) {
