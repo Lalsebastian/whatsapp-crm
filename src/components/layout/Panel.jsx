@@ -29,7 +29,7 @@ export function PanelHeader({ className, children, ...props }) {
     <header
       data-slot="panel-header"
       className={cn(
-        'border-border/70 flex shrink-0 items-center gap-3 border-b px-4 py-3.5',
+        'border-border/70 flex shrink-0 items-center gap-3 border-b px-4 py-3.5 transition-colors duration-300',
         className
       )}
       {...props}
@@ -43,7 +43,7 @@ export function PanelTitle({ className, children, ...props }) {
   return (
     <h2
       data-slot="panel-title"
-      className={cn('truncate text-sm font-semibold tracking-tight', className)}
+      className={cn('truncate text-sm font-semibold tracking-tight transition-[letter-spacing,color] duration-300', className)}
       {...props}
     >
       {children}

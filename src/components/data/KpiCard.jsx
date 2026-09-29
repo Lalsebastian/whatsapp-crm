@@ -22,15 +22,15 @@ export function KpiCard({
   className,
 }) {
   return (
-    <Panel className={cn('surface-shine group relative gap-0 overflow-hidden p-4 hover:-translate-y-1 hover:border-primary/35 hover:shadow-[0_18px_42px_rgba(15,23,42,.11)]', className)}>
-      <div className={cn('absolute inset-x-0 top-0 h-0.5 opacity-70', TONE_LINE[tone] ?? TONE_LINE.neutral)} />
+    <Panel className={cn('surreal-kpi surface-shine group relative gap-0 overflow-hidden p-4 hover:-translate-y-1 hover:border-primary/35 hover:shadow-[0_18px_42px_rgba(15,23,42,.11)]', className)}>
+      <div className={cn('kpi-accent-line absolute inset-x-0 top-0 h-0.5 origin-left opacity-70', TONE_LINE[tone] ?? TONE_LINE.neutral)} />
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-muted-foreground truncate text-xs font-medium">{label}</div>
           {loading ? (
             <Skeleton className="mt-2 h-7 w-24" />
           ) : (
-            <div className="tabular mt-1.5 truncate text-2xl leading-none font-semibold tracking-tight">
+            <div className="kpi-value tabular mt-1.5 truncate text-2xl leading-none font-semibold tracking-tight transition-transform duration-300">
               {value}
             </div>
           )}
@@ -39,7 +39,7 @@ export function KpiCard({
         {Icon ? (
           <div
             className={cn(
-              'flex size-8 shrink-0 items-center justify-center rounded-lg transition-[transform,box-shadow] duration-300 group-hover:rotate-3 group-hover:scale-110 group-hover:shadow-md',
+              'surreal-icon flex size-8 shrink-0 items-center justify-center transition-[transform,box-shadow,border-radius] duration-500 group-hover:rotate-6 group-hover:scale-110 group-hover:shadow-md',
               TONE_ICON[tone] ?? TONE_ICON.neutral
             )}
           >

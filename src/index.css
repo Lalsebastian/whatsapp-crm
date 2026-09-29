@@ -85,6 +85,71 @@
   100% { background-position: 0% 50%; }
 }
 
+@keyframes joboy-content-rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.992); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes joboy-aurora-shift {
+  0%, 100% { background-position: 0% 20%, 100% 80%, 50% 50%; }
+  50% { background-position: 12% 32%, 88% 68%, 56% 44%; }
+}
+
+@keyframes joboy-panel-line {
+  0%, 100% { transform: scaleX(0.28); opacity: 0.35; }
+  50% { transform: scaleX(1); opacity: 0.8; }
+}
+
+@keyframes joboy-chart-reveal {
+  from { opacity: 0; transform: translateY(10px); filter: saturate(0.7); }
+  to { opacity: 1; transform: translateY(0); filter: saturate(1); }
+}
+
+@keyframes joboy-skeleton-flow {
+  from { background-position: 180% 0; }
+  to { background-position: -80% 0; }
+}
+
+@keyframes surreal-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(-8deg); }
+  50% { transform: translate3d(0, -18px, 0) rotate(4deg); }
+}
+
+@keyframes surreal-orbit-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes surreal-morph {
+  0%, 100% { border-radius: 62% 38% 52% 48% / 44% 56% 44% 56%; }
+  50% { border-radius: 38% 62% 42% 58% / 58% 42% 62% 38%; }
+}
+
+@keyframes surreal-ribbon-wave {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(-12deg) skewX(-7deg); }
+  50% { transform: translate3d(22px, -12px, 0) rotate(-5deg) skewX(4deg); }
+}
+
+@keyframes surreal-particle-drift {
+  from { background-position: 0 0, 40px 60px; }
+  to { background-position: 120px -80px, -70px 140px; }
+}
+
+@keyframes surreal-portal-breathe {
+  0%, 100% { transform: scale(0.92) rotate(-8deg); opacity: 0.16; }
+  50% { transform: scale(1.08) rotate(5deg); opacity: 0.34; }
+}
+
+@keyframes surreal-eye-blink {
+  0%, 44%, 52%, 100% { transform: scaleY(1); }
+  48% { transform: scaleY(0.12); }
+}
+
+@keyframes surreal-kpi-float {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -3px; }
+}
+
 .dark {
   --background: oklch(0.17 0.025 258);
   --foreground: oklch(0.88 0.14 91);
@@ -215,15 +280,31 @@
       radial-gradient(circle at 12% 10%, rgb(255 255 255 / 0.35), transparent 28%),
       linear-gradient(135deg, var(--brand-yellow) 0%, var(--brand-yellow) 58%, var(--brand-navy) 125%);
     background-size: 100% 100%, 180% 180%;
+    transition: background-position 500ms var(--motion-productive), box-shadow 220ms ease, transform 220ms var(--motion-productive);
+  }
+
+  .joboy-gradient:hover {
+    background-position: 0 0, 100% 100%;
   }
 
   .joboy-nav-active {
     background-image: linear-gradient(90deg, color-mix(in oklab, var(--brand-yellow) 16%, transparent), color-mix(in oklab, var(--brand-navy) 4%, transparent));
+    background-size: 180% 100%;
+    animation: joboy-accent-flow 7s ease-in-out infinite;
   }
 
   .view-enter {
     animation: joboy-page-enter 400ms var(--motion-entrance) both;
   }
+
+  .view-enter > * {
+    animation: joboy-content-rise 500ms var(--motion-entrance) both;
+  }
+
+  .view-enter > :nth-child(2) { animation-delay: 55ms; }
+  .view-enter > :nth-child(3) { animation-delay: 95ms; }
+  .view-enter > :nth-child(4) { animation-delay: 130ms; }
+  .view-enter > :nth-child(n + 5) { animation-delay: 160ms; }
 
   .ambient-orb {
     animation: joboy-ambient-drift 12s ease-in-out infinite;
@@ -236,10 +317,234 @@
   }
 
   .app-canvas {
+    --spotlight-x: 72vw;
+    --spotlight-y: 18vh;
+    --parallax-x: 0px;
+    --parallax-y: 0px;
     background:
-      radial-gradient(circle at 88% -5%, color-mix(in oklab, var(--primary) 11%, transparent), transparent 34rem),
-      radial-gradient(circle at 20% 105%, color-mix(in oklab, var(--accent) 7%, transparent), transparent 38rem),
+      radial-gradient(circle at 88% -5%, color-mix(in oklab, var(--primary) 14%, transparent), transparent 34rem),
+      radial-gradient(circle at 20% 105%, color-mix(in oklab, var(--brand-navy) 9%, transparent), transparent 38rem),
       var(--background);
+  }
+
+  .aurora-mesh {
+    background:
+      radial-gradient(ellipse 42% 34% at 12% 18%, color-mix(in oklab, var(--brand-navy) 8%, transparent), transparent 70%),
+      radial-gradient(ellipse 38% 32% at 88% 22%, color-mix(in oklab, var(--brand-yellow) 14%, transparent), transparent 72%),
+      radial-gradient(ellipse 36% 30% at 55% 92%, color-mix(in oklab, var(--brand-navy) 6%, transparent), transparent 74%);
+    background-size: 130% 130%;
+    animation: joboy-aurora-shift 18s ease-in-out infinite;
+  }
+
+  .dashboard-grid {
+    background-image: radial-gradient(color-mix(in oklab, var(--brand-navy) 13%, transparent) 0.7px, transparent 0.7px);
+    background-size: 22px 22px;
+    mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.38), transparent 72%);
+    opacity: 0.28;
+  }
+
+  .cursor-spotlight {
+    background: radial-gradient(380px circle at var(--spotlight-x) var(--spotlight-y), color-mix(in oklab, var(--brand-yellow) 10%, transparent), transparent 66%);
+    transition: opacity 300ms ease;
+    opacity: 0.72;
+  }
+
+  .surreal-scene {
+    transform: translate3d(var(--parallax-x), var(--parallax-y), 0);
+    transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+  }
+
+  .surreal-particles {
+    background-image:
+      radial-gradient(circle, color-mix(in oklab, var(--brand-yellow) 52%, transparent) 0 1px, transparent 1.6px),
+      radial-gradient(circle, color-mix(in oklab, var(--brand-navy) 38%, transparent) 0 1px, transparent 1.6px);
+    background-position: 0 0, 40px 60px;
+    background-size: 74px 74px, 110px 110px;
+    mask-image: linear-gradient(115deg, transparent 5%, rgb(0 0 0 / 0.7) 38%, transparent 88%);
+    opacity: 0.22;
+    animation: surreal-particle-drift 28s linear infinite;
+  }
+
+  .surreal-sun {
+    position: absolute;
+    top: 14%;
+    right: 4%;
+    width: 10rem;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 34% 28%, rgb(255 255 255 / 0.8), transparent 18%),
+      radial-gradient(circle, var(--brand-yellow) 0 57%, color-mix(in oklab, var(--brand-yellow) 15%, transparent) 58% 70%, transparent 71%);
+    box-shadow: 0 24px 80px color-mix(in oklab, var(--brand-yellow) 24%, transparent);
+    opacity: 0.22;
+    animation: surreal-drift 10s ease-in-out infinite;
+  }
+
+  .surreal-sun span {
+    position: absolute;
+    inset: 37%;
+    border-radius: 50% 50% 45% 55%;
+    background: var(--brand-navy);
+    box-shadow: 0 0 0 8px color-mix(in oklab, var(--brand-navy) 12%, transparent);
+    transform-origin: center;
+    animation: surreal-eye-blink 8s ease-in-out infinite;
+  }
+
+  .surreal-orbit {
+    position: absolute;
+    top: 38%;
+    left: 22%;
+    width: 8rem;
+    aspect-ratio: 1.8;
+    border: 1px solid color-mix(in oklab, var(--brand-navy) 24%, transparent);
+    border-radius: 50%;
+    transform: rotate(-18deg);
+    opacity: 0.32;
+  }
+
+  .surreal-orbit span {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 100%;
+    animation: surreal-orbit-spin 14s linear infinite;
+  }
+
+  .surreal-orbit span::after {
+    content: '';
+    position: absolute;
+    top: -0.28rem;
+    left: 50%;
+    width: 0.58rem;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: var(--brand-yellow);
+    box-shadow: 0 0 18px color-mix(in oklab, var(--brand-yellow) 60%, transparent);
+  }
+
+  .surreal-monolith {
+    position: absolute;
+    right: -3rem;
+    bottom: 7%;
+    width: 8rem;
+    height: 21rem;
+    border-radius: 999px 999px 2rem 2rem;
+    background: linear-gradient(155deg, color-mix(in oklab, var(--brand-navy) 15%, transparent), color-mix(in oklab, var(--brand-yellow) 8%, transparent));
+    border: 1px solid color-mix(in oklab, var(--brand-navy) 12%, transparent);
+    transform: rotate(8deg);
+    opacity: 0.34;
+    animation: surreal-drift 14s ease-in-out -4s infinite reverse;
+  }
+
+  .surreal-ribbon {
+    position: absolute;
+    left: 38%;
+    bottom: 8%;
+    width: 21rem;
+    height: 5.5rem;
+    border-radius: 62% 38% 58% 42% / 48% 58% 42% 52%;
+    background: linear-gradient(110deg, color-mix(in oklab, var(--brand-navy) 9%, transparent), color-mix(in oklab, var(--brand-yellow) 14%, transparent), transparent 78%);
+    border: 1px solid color-mix(in oklab, var(--brand-yellow) 13%, transparent);
+    filter: blur(0.2px);
+    opacity: 0.45;
+    animation: surreal-ribbon-wave 13s ease-in-out infinite;
+  }
+
+  .surreal-portal {
+    position: absolute;
+    left: 7%;
+    bottom: 13%;
+    width: 9rem;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: conic-gradient(from 90deg, transparent 5%, var(--brand-yellow), var(--brand-navy), transparent 72%);
+    mask-image: radial-gradient(circle, transparent 0 43%, #000 46% 57%, transparent 60%);
+    filter: drop-shadow(0 0 18px color-mix(in oklab, var(--brand-yellow) 22%, transparent));
+    animation: surreal-portal-breathe 9s ease-in-out infinite;
+  }
+
+  .surreal-portal i {
+    position: absolute;
+    inset: 17%;
+    border: 1px solid color-mix(in oklab, var(--brand-navy) 35%, transparent);
+    border-radius: 50%;
+  }
+
+  .surreal-portal i:last-child {
+    inset: 29%;
+    border-color: color-mix(in oklab, var(--brand-yellow) 55%, transparent);
+  }
+
+  .surreal-kpi {
+    animation: surreal-kpi-float 7s ease-in-out infinite;
+  }
+
+  .surreal-kpi:nth-child(2n) { animation-delay: -2s; }
+  .surreal-kpi:nth-child(3n) { animation-delay: -4s; }
+  .surreal-kpi:hover { animation-play-state: paused; }
+
+  .dream-header {
+    position: relative;
+    isolation: isolate;
+    padding-left: 0.25rem;
+  }
+
+  .dream-header::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    top: -0.7rem;
+    left: -0.65rem;
+    width: 5.5rem;
+    height: 2.8rem;
+    border-radius: 68% 32% 61% 39% / 46% 58% 42% 54%;
+    background: color-mix(in oklab, var(--brand-yellow) 11%, transparent);
+    filter: blur(0.5px);
+    animation: surreal-morph 9s ease-in-out infinite;
+  }
+
+  .dream-title {
+    position: relative;
+    display: inline-block;
+  }
+
+  .dream-title::after {
+    content: '';
+    position: absolute;
+    right: -0.85rem;
+    bottom: 0.08rem;
+    width: 0.42rem;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: var(--brand-yellow);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--brand-yellow) 14%, transparent);
+  }
+
+  .dreamscape [data-slot='panel'] {
+    border-radius: 1.6rem 1.6rem 1.6rem 0.7rem;
+  }
+
+  .dreamscape [data-slot='button'] {
+    border-radius: 0.9rem 0.9rem 0.9rem 0.35rem;
+  }
+
+  .dreamscape [data-slot='input'] {
+    border-radius: 1rem 1rem 1rem 0.45rem;
+  }
+
+  .surreal-icon,
+  .surreal-nav-icon {
+    border-radius: 62% 38% 52% 48% / 44% 56% 44% 56%;
+  }
+
+  .surreal-icon {
+    animation: surreal-morph 9s ease-in-out infinite;
+  }
+
+  .surreal-nav-icon:hover {
+    border-radius: 38% 62% 42% 58% / 58% 42% 62% 38%;
   }
 
   .surface-shine::after {
@@ -272,9 +577,75 @@
     background-image: radial-gradient(circle at 100% 0%, color-mix(in oklab, var(--brand-yellow) 5%, transparent), transparent 12rem);
   }
 
+  .joboy-surface::before {
+    content: '';
+    position: absolute;
+    z-index: 2;
+    top: 0;
+    left: 12%;
+    right: 12%;
+    height: 1px;
+    transform-origin: center;
+    background: linear-gradient(90deg, transparent, var(--brand-yellow), var(--brand-navy), transparent);
+    animation: joboy-panel-line 7s ease-in-out infinite;
+    pointer-events: none;
+  }
+
   .joboy-surface:hover {
     border-color: color-mix(in oklab, var(--brand-yellow) 28%, var(--border));
     box-shadow: 0 1px 2px rgb(15 23 42 / 0.03), 0 18px 46px rgb(15 23 42 / 0.075);
+  }
+
+  [data-slot='panel']:hover [data-slot='panel-title'] {
+    color: var(--info);
+    letter-spacing: 0.012em;
+  }
+
+  [data-slot='panel'] canvas {
+    animation: joboy-chart-reveal 650ms var(--motion-entrance) both;
+  }
+
+  .kpi-accent-line {
+    transition: transform 450ms var(--motion-productive), opacity 300ms ease;
+  }
+
+  [data-slot='panel']:hover .kpi-accent-line {
+    transform: scaleX(1.06);
+    opacity: 1;
+  }
+
+  [data-slot='panel']:hover .kpi-value {
+    transform: translateY(-1px) scale(1.025);
+  }
+
+  .whatsapp-status {
+    box-shadow: 0 8px 22px color-mix(in oklab, var(--success) 10%, transparent);
+    transition: transform 220ms var(--motion-productive), box-shadow 220ms ease, border-color 220ms ease;
+  }
+
+  .whatsapp-status:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in oklab, var(--success) 32%, var(--border));
+    box-shadow: 0 10px 28px color-mix(in oklab, var(--success) 16%, transparent);
+  }
+
+  [data-slot='input']:focus-visible {
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--brand-yellow) 14%, transparent), 0 10px 28px rgb(15 23 42 / 0.07);
+  }
+
+  [data-slot='badge'] {
+    transition: transform 180ms var(--motion-productive), box-shadow 180ms ease;
+  }
+
+  [data-slot='badge']:hover {
+    transform: translateY(-1px) scale(1.025);
+    box-shadow: 0 6px 16px rgb(15 23 42 / 0.08);
+  }
+
+  [data-slot='skeleton'] {
+    background-image: linear-gradient(100deg, var(--muted) 18%, color-mix(in oklab, var(--brand-yellow) 10%, var(--card)) 40%, var(--muted) 62%);
+    background-size: 220% 100%;
+    animation: joboy-skeleton-flow 1.5s ease-in-out infinite;
   }
 
   [data-slot='button'] {
@@ -324,12 +695,49 @@
 
 @media (prefers-reduced-motion: reduce) {
   .view-enter,
+  .view-enter > *,
   .ambient-orb,
+  .aurora-mesh,
+  .joboy-nav-active,
+  .joboy-surface::before,
+  .surreal-sun,
+  .surreal-sun span,
+  .surreal-orbit span,
+  .surreal-monolith,
+  .surreal-ribbon,
+  .surreal-particles,
+  .surreal-portal,
+  .surreal-kpi,
+  .dream-header::before,
+  .surreal-icon,
+  [data-slot='skeleton'],
   .joboy-topbar::after {
     animation: none !important;
   }
 
+  .surreal-scene {
+    transform: none !important;
+    transition: none !important;
+  }
+
   [data-slot='button']::after {
     display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .cursor-spotlight {
+    display: none;
+  }
+
+  .surreal-sun,
+  .surreal-orbit,
+  .surreal-ribbon,
+  .surreal-portal {
+    opacity: 0.14;
+  }
+
+  .surreal-scene {
+    transform: none;
   }
 }

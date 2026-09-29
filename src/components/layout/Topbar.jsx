@@ -28,7 +28,7 @@ export function Topbar() {
     <header className="joboy-topbar bg-background/85 supports-[backdrop-filter]:bg-background/65 sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b px-4 backdrop-blur-xl lg:px-6">
       <MobileNavTrigger />
 
-      <div className="bg-success/8 text-foreground hidden items-center gap-2 rounded-full border border-success/15 px-3 py-1.5 text-xs font-semibold md:flex">
+      <div className="whatsapp-status bg-success/8 text-foreground hidden items-center gap-2 rounded-full border border-success/15 px-3 py-1.5 text-xs font-semibold md:flex">
         <span className="relative flex size-2">
           <span className="bg-success absolute inline-flex size-full animate-ping rounded-full opacity-40" />
           <span className="bg-success relative inline-flex size-2 rounded-full" />
