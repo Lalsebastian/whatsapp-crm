@@ -31,16 +31,23 @@ describe('evaluateTriggers', () => {
     expect(evaluateTriggers({ repeatedComplaintCount: 3 }).reason).toBe('repeated_unresolved_complaint');
   });
 
-  it('escalates on low AI confidence for a determined (non-UNKNOWN) intent', () => {
-    expect(evaluateTriggers({ intent: 'NEW_BOOKING', confidence: 0.2 }).reason).toBe('low_ai_confidence');
+  it('does NOT escalate a single low-confidence message, even with a determined intent', () => {
+    // A single so-so confidence score from the AI on an otherwise-clear
+    // message shouldn't permanently silence the bot — only repeated
+    // struggling (see the streak tests below) should.
+    expect(evaluateTriggers({ intent: 'NEW_BOOKING', confidence: 0.2, struggleStreak: 1 }).escalate).toBe(false);
+  });
+
+  it('escalates once low-confidence responses repeat past the streak threshold', () => {
+    expect(evaluateTriggers({ intent: 'NEW_BOOKING', confidence: 0.2, struggleStreak: 3 }).reason).toBe('intent_undetermined');
   });
 
   it('escalates once UNKNOWN intent repeats past the streak threshold', () => {
-    expect(evaluateTriggers({ intent: 'UNKNOWN', unknownStreak: 3 }).reason).toBe('intent_undetermined');
+    expect(evaluateTriggers({ intent: 'UNKNOWN', struggleStreak: 3 }).reason).toBe('intent_undetermined');
   });
 
   it('does NOT escalate a single UNKNOWN intent', () => {
-    expect(evaluateTriggers({ intent: 'UNKNOWN', unknownStreak: 1 }).escalate).toBe(false);
+    expect(evaluateTriggers({ intent: 'UNKNOWN', struggleStreak: 1 }).escalate).toBe(false);
   });
 
   it('does NOT escalate a normal, confident booking message', () => {

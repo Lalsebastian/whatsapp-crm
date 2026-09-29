@@ -1,7 +1,9 @@
-// Tracks consecutive UNKNOWN-intent messages per phone, in-memory (same
-// known limitation as dedup.js — resets on restart, single-instance only).
-// Feeds escalationService's "intent undeterminable after reasonable attempts"
-// trigger without needing a schema change for something this ephemeral.
+// Tracks consecutive "struggling" messages per phone (UNKNOWN intent, or a
+// low-confidence read on a determined one — see escalationService.isStruggling),
+// in-memory (same known limitation as dedup.js — resets on restart,
+// single-instance only). Feeds escalationService's "intent undeterminable
+// after reasonable attempts" trigger without needing a schema change for
+// something this ephemeral.
 const streaks = new Map();
 
 function increment(phone) {

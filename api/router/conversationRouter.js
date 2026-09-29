@@ -13,7 +13,7 @@ const { getCrmAdapter } = require('../crm');
 const { detectIntent } = require('../ai/intentService');
 const { downloadWhatsAppMedia } = require('../media/mediaHandler');
 const { transcribeAudio } = require('../media/transcription');
-const { evaluateTriggers, triggerEscalation } = require('../escalation/escalationService');
+const { evaluateTriggers, triggerEscalation, isStruggling } = require('../escalation/escalationService');
 const unknownStreak = require('./unknownStreak');
 const testChannel = require('../whatsapp/testChannel');
 
@@ -135,7 +135,7 @@ async function routeFreeText(session, customer, inbound) {
   }
 
   let streak = 0;
-  if (intentResult.intent === 'UNKNOWN') {
+  if (isStruggling(intentResult)) {
     streak = unknownStreak.increment(session.phone);
   } else {
     unknownStreak.reset(session.phone);
@@ -145,7 +145,7 @@ async function routeFreeText(session, customer, inbound) {
     text: inbound.text,
     intent: intentResult.intent,
     confidence: intentResult.confidence,
-    unknownStreak: streak,
+    struggleStreak: streak,
   });
 
   if (trigger.escalate) {
