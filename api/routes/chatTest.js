@@ -8,6 +8,8 @@ const env = require('../config/env');
 const logger = require('../utils/logger');
 const { handleInboundMessage } = require('../router/conversationRouter');
 const testChannel = require('../whatsapp/testChannel');
+const sessionStore = require('../session/sessionStore');
+const unknownStreak = require('../router/unknownStreak');
 
 const router = express.Router();
 
@@ -44,6 +46,20 @@ function requireTestChatAccess(req, res, next) {
 router.get('/status', (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({ enabled: isTestChatEnabled(), requiresSecret: true });
+});
+
+router.post('/reset', requireTestChatAccess, async (req, res) => {
+  const phone = String((req.body && req.body.phone) || '').trim();
+  if (!phone) return res.status(400).json({ error: 'Request body must include "phone".' });
+
+  try {
+    await sessionStore.resetSession(phone);
+    unknownStreak.reset(phone);
+    return res.json({ success: true, message: 'Test session reset.' });
+  } catch (err) {
+    logger.error('CHAT_TEST', 'resetSession failed:', err.message);
+    return res.status(500).json({ error: 'Unable to reset the test session.' });
+  }
 });
 
 router.post('/', requireTestChatAccess, async (req, res) => {
@@ -85,6 +101,9 @@ router.post('/', requireTestChatAccess, async (req, res) => {
       intent: result.intent || null,
       confidence: result.confidence ?? null,
       aiMatch: result.aiMatch || null,
+      service: result.service || null,
+      matchSource: result.matchSource || null,
+      serviceConfidence: result.serviceConfidence ?? null,
       flow: result.flow || null,
       step: result.step || null,
       humanTakeover: !!result.humanTakeover,

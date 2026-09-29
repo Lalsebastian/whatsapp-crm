@@ -22,6 +22,7 @@ const COMPLAINT_CATEGORIES = [
   'payment_issue',
   'other',
 ];
+const { hintsForService } = require('./serviceHints');
 
 function buildIntentPrompt(message, context = {}) {
   return `You are the intent-understanding layer for a home services company's WhatsApp chatbot. You ONLY interpret the customer's message into structured data — you never take any action yourself, and the backend is the only thing allowed to touch booking/complaint records.
@@ -78,6 +79,7 @@ function buildServiceMatchPrompt(message, services, context = {}) {
     name: service.name,
     category: service.category || null,
     description: service.description || null,
+    semanticHints: hintsForService(service),
   }));
 
   return `Match a customer's home-service request to the supplied CRM service catalog. You only interpret the request; you never book or modify anything.

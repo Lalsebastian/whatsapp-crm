@@ -96,7 +96,15 @@ async function processInboundMessage(inbound) {
   // mutate the local `session` object — re-read it so the returned
   // flow/step always reflect where the conversation actually ended up.
   const freshSession = await sessionStore.getOrCreateSession(from);
-  return { ...result, flow: freshSession.currentFlow, step: freshSession.currentStep };
+  const context = freshSession.context || {};
+  return {
+    ...result,
+    flow: freshSession.currentFlow,
+    step: freshSession.currentStep,
+    service: context.serviceName || context.inferredServiceName || null,
+    matchSource: context.serviceMatchSource || null,
+    serviceConfidence: context.serviceMatchConfidence ?? null,
+  };
 }
 
 function handleInboundMessage(inbound) {

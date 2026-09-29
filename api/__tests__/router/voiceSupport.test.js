@@ -83,6 +83,7 @@ describe('voice notes through the conversation router', () => {
     crmAdapter.findCustomerByPhone.mockResolvedValue({ id: 'cust1' });
     mediaHandler.downloadWhatsAppMedia.mockResolvedValue({ buffer: Buffer.from('audio'), mimeType: 'audio/ogg' });
     intentService.matchServiceToCatalog.mockResolvedValue({ serviceId: null, confidence: 0 });
+    crmAdapter.getCustomerProperties.mockResolvedValue([]);
   });
 
   it('routes "I need plumber tomorrow" through the existing booking flow', async () => {
@@ -97,8 +98,8 @@ describe('voice notes through the conversation router', () => {
     await handleInboundMessage(inbound('wamid-booking-voice'));
 
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
-      '971500', 'booking', 'confirm_service',
-      expect.objectContaining({ inferredServiceId: 'svc-plumbing', date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) })
+      '971500', 'booking', 'awaiting_new_property',
+      expect.objectContaining({ serviceId: 'svc-plumbing', date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) })
     );
     expect(transcription.transcribeAudio).toHaveBeenCalledWith(expect.objectContaining({
       mimeType: 'audio/ogg', languageHint: 'en',
@@ -115,8 +116,8 @@ describe('voice notes through the conversation router', () => {
     await handleInboundMessage(inbound('wamid-electrical-voice'));
 
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
-      '971500', 'booking', 'confirm_service',
-      expect.objectContaining({ inferredServiceId: 'svc-electrical', issue: 'My bedroom light is not working' })
+      '971500', 'booking', 'awaiting_new_property',
+      expect.objectContaining({ serviceId: 'svc-electrical', issue: 'My bedroom light is not working' })
     );
   });
 
@@ -132,7 +133,7 @@ describe('voice notes through the conversation router', () => {
     await handleInboundMessage(inbound('wamid-manglish-voice'));
 
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
-      '971500', 'booking', 'confirm_service',
+      '971500', 'booking', 'awaiting_new_property',
       expect.objectContaining({ locationHint: 'Kakkanad', voiceNotes: [expect.objectContaining({ transcript: 'Nale Kakkanad plumber venam' })] })
     );
   });

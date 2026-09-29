@@ -4,6 +4,10 @@ const express = require('express');
 const env = require('../../config/env');
 const conversationRouter = require('../../router/conversationRouter');
 conversationRouter.handleInboundMessage = vi.fn();
+const sessionStore = require('../../session/sessionStore');
+sessionStore.resetSession = vi.fn();
+const unknownStreak = require('../../router/unknownStreak');
+unknownStreak.reset = vi.fn();
 
 const whatsapp = require('../../whatsapp/client');
 const chatTestRoute = require('../../routes/chatTest');
@@ -34,6 +38,8 @@ describe('authorized test-chat endpoint', () => {
     env.ENABLE_TEST_CHAT = false;
     env.TEST_CHAT_SECRET = 'developer-secret';
     conversationRouter.handleInboundMessage.mockReset();
+    sessionStore.resetSession.mockReset();
+    unknownStreak.reset.mockReset();
   });
 
   afterEach(() => {
@@ -81,7 +87,10 @@ describe('authorized test-chat endpoint', () => {
         { id: 'MY_BOOKINGS', title: 'My Bookings' },
         { id: 'MORE_OPTIONS', title: 'More Options' },
       ]);
-      return { intent: null, flow: 'main_menu', step: null };
+      return {
+        intent: 'NEW_BOOKING', confidence: 0.96, flow: 'booking', step: 'select_property',
+        service: 'Electrical', matchSource: 'semantic_hint', serviceConfidence: 0.95,
+      };
     });
 
     const statusResponse = await fetch(`${baseUrl}/api/chat/test/status`);
@@ -100,14 +109,59 @@ describe('authorized test-chat endpoint', () => {
     });
     expect(body).toMatchObject({
       reply: 'Hello from Joboy',
-      intent: null,
-      flow: 'main_menu',
-      step: null,
+      intent: 'NEW_BOOKING',
+      confidence: 0.96,
+      flow: 'booking',
+      step: 'select_property',
+      service: 'Electrical',
+      matchSource: 'semantic_hint',
+      serviceConfidence: 0.95,
       options: [
         { id: 'BOOK_SERVICE', title: 'Book a Service' },
         { id: 'MY_BOOKINGS', title: 'My Bookings' },
         { id: 'MORE_OPTIONS', title: 'More Options' },
       ],
     });
+  });
+
+  it('resets only the selected phone session with a valid secret', async () => {
+    env.ENABLE_TEST_CHAT = true;
+    sessionStore.resetSession.mockResolvedValue({ phone: '971500000123' });
+
+    const response = await fetch(`${baseUrl}/api/chat/test/reset`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-test-chat-secret': 'developer-secret' },
+      body: JSON.stringify({ phone: '971500000123' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true, message: 'Test session reset.' });
+    expect(sessionStore.resetSession).toHaveBeenCalledTimes(1);
+    expect(sessionStore.resetSession).toHaveBeenCalledWith('971500000123');
+    expect(unknownStreak.reset).toHaveBeenCalledWith('971500000123');
+  });
+
+  it('does not reset a session with an invalid secret', async () => {
+    env.ENABLE_TEST_CHAT = true;
+    const response = await fetch(`${baseUrl}/api/chat/test/reset`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-test-chat-secret': 'wrong-secret' },
+      body: JSON.stringify({ phone: '971500000123' }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(sessionStore.resetSession).not.toHaveBeenCalled();
+  });
+
+  it('does not expose reset when test chat is disabled', async () => {
+    const response = await fetch(`${baseUrl}/api/chat/test/reset`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-test-chat-secret': 'developer-secret' },
+      body: JSON.stringify({ phone: '971500000123' }),
+    });
+
+    expect(response.status).toBe(404);
+    expect((await response.json()).code).toBe('TEST_CHAT_DISABLED');
+    expect(sessionStore.resetSession).not.toHaveBeenCalled();
   });
 });

@@ -6,7 +6,7 @@ const whatsapp = require('../whatsapp/client');
 const sessionStore = require('../session/sessionStore');
 const logger = require('../utils/logger');
 const { parseDateInput, formatDateForCustomer, formatSlotForCustomer } = require('./dateUtils');
-const { matchServiceToCatalog } = require('../ai/intentService');
+const serviceResolver = require('../ai/serviceResolver');
 const AI_CONFIDENCE = require('../ai/confidence');
 const { getCrmAdapter } = require('../crm');
 const { randomUUID } = require('node:crypto');
@@ -15,23 +15,6 @@ const { triggerEscalation } = require('../escalation/escalationService');
 
 const crm = getCrmAdapter();
 const FLOW = 'booking';
-
-function escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function matchServiceByText(text, services) {
-  const lower = String(text || '').trim().toLowerCase();
-  if (!lower) return null;
-  const byCategory = services.filter((service) => service.category &&
-    new RegExp(`\\b${escapeRegex(service.category)}\\b`, 'i').test(lower));
-  if (byCategory.length === 1) return byCategory[0];
-  const byName = services.filter((service) => {
-    const name = String(service.name || '').toLowerCase();
-    return name && (lower.includes(name) || name.includes(lower));
-  });
-  return byName.length === 1 ? byName[0] : null;
-}
 
 function propertyDisplay(property) {
   const place = [property.area, property.city].filter(Boolean).join(', ');
@@ -112,19 +95,18 @@ async function promptServiceList(session, services, context = {}, intro) {
   await sessionStore.setFlow(session.phone, FLOW, 'select_service', context);
 }
 
-async function promptServiceConfirmation(session, service, context) {
+async function promptServiceConfirmation(session, service, context, match = {}) {
   await whatsapp.sendButtons(session.phone, `It sounds like you need ${service.name}. Is that correct?`, [
     { id: 'CONFIRM_INFERRED_SERVICE', title: `Yes, ${service.name}` },
     { id: 'CHOOSE_ANOTHER_SERVICE', title: 'Choose Another' },
   ]);
-  await sessionStore.setFlow(session.phone, FLOW, 'confirm_service', { ...context, inferredServiceId: service.id });
-}
-
-async function resolveSemanticService(session, text, services) {
-  const result = await matchServiceToCatalog(text, services, { preferredLanguage: session.preferredLanguage });
-  if (!result.serviceId || result.confidence < AI_CONFIDENCE.MEDIUM) return null;
-  const service = services.find((item) => String(item.id) === String(result.serviceId));
-  return service ? { service, confidence: result.confidence } : null;
+  await sessionStore.setFlow(session.phone, FLOW, 'confirm_service', {
+    ...context,
+    inferredServiceId: service.id,
+    inferredServiceName: service.name,
+    serviceMatchSource: match.source || 'ai',
+    serviceMatchConfidence: match.confidence ?? null,
+  });
 }
 
 async function startBooking(session, customer, input = {}) {
@@ -136,10 +118,20 @@ async function startBooking(session, customer, input = {}) {
   }
   const context = aiPrefill(input);
   if (input.ai) {
-    const deterministic = matchServiceByText(input.ai.service, services);
-    const semantic = deterministic ? null : await resolveSemanticService(session, input.text, services);
-    const service = deterministic || (semantic && semantic.service);
-    if (service) return promptServiceConfirmation(session, service, context);
+    const serviceText = [input.ai.service, input.text].filter(Boolean).join(' ');
+    const match = await serviceResolver.resolveService(serviceText, services, {
+      preferredLanguage: session.preferredLanguage,
+    });
+    if (match && match.confidence >= AI_CONFIDENCE.HIGH) {
+      return continueWithService(session, customer, match.service, {
+        ...context,
+        serviceMatchSource: match.source,
+        serviceMatchConfidence: match.confidence,
+      });
+    }
+    if (match && match.confidence >= AI_CONFIDENCE.MEDIUM) {
+      return promptServiceConfirmation(session, match.service, context, match);
+    }
     logger.log('AI_FALLBACK_USED', { flow: FLOW, reason: 'service_not_resolved' });
   }
   await promptServiceList(session, services, context);
@@ -147,7 +139,7 @@ async function startBooking(session, customer, input = {}) {
 
 async function continueWithService(session, customer, service, priorContext = {}) {
   logger.log('SERVICE_SELECTED', { phone: session.phone, serviceId: service.id });
-  const { inferredServiceId, ...cleanContext } = priorContext;
+  const { inferredServiceId, inferredServiceName, ...cleanContext } = priorContext;
   const context = {
     ...cleanContext,
     serviceId: service.id,
@@ -195,19 +187,28 @@ async function handleSelectService(session, customer, input) {
     : session.context;
   if (input.buttonId && input.buttonId.startsWith('SVC_')) {
     const service = await crm.getServiceDetails(input.buttonId.replace('SVC_', ''));
-    if (service) return continueWithService(session, customer, service, voiceContext);
+    if (service) return continueWithService(session, customer, service, {
+      ...voiceContext,
+      serviceMatchSource: 'button',
+      serviceMatchConfidence: 1,
+    });
   } else if (input.text) {
-    const deterministic = matchServiceByText(input.text, services);
-    if (deterministic) {
-      return continueWithService(session, customer, deterministic, voiceContext);
-    }
-    const semantic = await resolveSemanticService(session, input.text, services);
-    if (semantic) {
-      return promptServiceConfirmation(session, semantic.service, {
+    const match = await serviceResolver.resolveService(input.text, services, {
+      preferredLanguage: session.preferredLanguage,
+    });
+    if (match && match.confidence >= AI_CONFIDENCE.HIGH) {
+      return continueWithService(session, customer, match.service, {
         ...voiceContext,
         issue: voiceContext.issue || input.text.trim(),
-        aiServiceConfidence: semantic.confidence,
+        serviceMatchSource: match.source,
+        serviceMatchConfidence: match.confidence,
       });
+    }
+    if (match && match.confidence >= AI_CONFIDENCE.MEDIUM) {
+      return promptServiceConfirmation(session, match.service, {
+        ...voiceContext,
+        issue: voiceContext.issue || input.text.trim(),
+      }, match);
     }
     logger.log('AI_LOW_CONFIDENCE', { flow: FLOW, step: 'select_service' });
   }
@@ -220,7 +221,13 @@ async function handleSelectService(session, customer, input) {
 async function handleConfirmService(session, customer, input) {
   if (input.buttonId === 'CHOOSE_ANOTHER_SERVICE') {
     const services = await crm.getServices();
-    const { inferredServiceId, ...context } = session.context;
+    const {
+      inferredServiceId,
+      inferredServiceName,
+      serviceMatchSource,
+      serviceMatchConfidence,
+      ...context
+    } = session.context;
     return promptServiceList(session, services, context, 'Certainly. Please choose another service or describe what you need.');
   }
   if (input.buttonId !== 'CONFIRM_INFERRED_SERVICE') {

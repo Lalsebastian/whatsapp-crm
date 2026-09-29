@@ -39,6 +39,7 @@ function resetAll() {
     .forEach((fn) => fn.mockReset());
   actionGuard.clearForTests();
   intentService.matchServiceToCatalog.mockResolvedValue({ serviceId: null, confidence: 0 });
+  fakeCrm.getCustomerProperties.mockResolvedValue([]);
 }
 
 describe('booking flow — confirm step', () => {
@@ -139,8 +140,9 @@ describe('booking flow — select_service step', () => {
     expect(whatsapp.sendText).toHaveBeenCalled();
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
       '971500', 'booking', 'awaiting_new_property',
-      expect.objectContaining({ serviceId: 'svc1', serviceName: 'AC Service' })
+      expect.objectContaining({ serviceId: 'svc1', serviceName: 'AC Service', serviceMatchSource: 'button' })
     );
+    expect(intentService.matchServiceToCatalog).not.toHaveBeenCalled();
   });
 
   it('matches a service from free text by category, even mid-flow', async () => {
@@ -171,39 +173,54 @@ describe('booking flow — select_service step', () => {
     expect(fakeCrm.getCustomerProperties).not.toHaveBeenCalled();
   });
 
-  it('uses CRM-constrained semantic matching for a natural service request', async () => {
+  it('uses an unambiguous semantic hint without calling AI', async () => {
     fakeCrm.getServices.mockResolvedValue([
       { id: 'svc-electrical', name: 'Electrical', category: 'electrical' },
       { id: 'svc-plumbing', name: 'Plumbing', category: 'plumbing' },
     ]);
-    intentService.matchServiceToCatalog.mockResolvedValue({ serviceId: 'svc-electrical', confidence: 0.93 });
     const session = { phone: '971500', context: {} };
 
     await booking.steps.select_service(session, { id: 'cust1' }, { text: 'light is not working' });
 
-    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
-      '971500', expect.stringContaining('need Electrical'), expect.any(Array)
-    );
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
-      '971500', 'booking', 'confirm_service',
-      expect.objectContaining({ inferredServiceId: 'svc-electrical', issue: 'light is not working' })
+      '971500', 'booking', 'awaiting_new_property',
+      expect.objectContaining({ serviceId: 'svc-electrical', issue: 'light is not working', serviceMatchSource: 'semantic_hint' })
     );
+    expect(intentService.matchServiceToCatalog).not.toHaveBeenCalled();
     expect(fakeCrm.createBooking).not.toHaveBeenCalled();
   });
 
-  it('supports Manglish service descriptions through the same semantic matcher', async () => {
-    fakeCrm.getServices.mockResolvedValue([{ id: 'svc-plumbing', name: 'Plumbing', category: 'plumbing' }]);
-    intentService.matchServiceToCatalog.mockResolvedValue({ serviceId: 'svc-plumbing', confidence: 0.9 });
+  it('asks for confirmation on a medium-confidence Gemini match', async () => {
+    fakeCrm.getServices.mockResolvedValue([{ id: 'svc-appliance', name: 'Appliance Repair', category: 'appliances' }]);
+    intentService.matchServiceToCatalog.mockResolvedValue({ serviceId: 'svc-appliance', confidence: 0.74 });
 
     await booking.steps.select_service(
-      { phone: '971500', context: {}, preferredLanguage: 'manglish' },
+      { phone: '971500', context: {}, preferredLanguage: 'en' },
       { id: 'cust1' },
-      { text: 'Nale Kakkanad plumber venam' }
+      { text: 'my washing machine makes an odd sound' }
     );
 
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
-      '971500', 'booking', 'confirm_service', expect.objectContaining({ inferredServiceId: 'svc-plumbing' })
+      '971500', 'booking', 'confirm_service',
+      expect.objectContaining({ inferredServiceId: 'svc-appliance', serviceMatchSource: 'ai', serviceMatchConfidence: 0.74 })
     );
+  });
+
+  it('continues immediately on a high-confidence Gemini catalog match', async () => {
+    fakeCrm.getServices.mockResolvedValue([{ id: 'svc-appliance', name: 'Appliance Repair', category: 'appliances' }]);
+    intentService.matchServiceToCatalog.mockResolvedValue({ serviceId: 'svc-appliance', confidence: 0.91 });
+
+    await booking.steps.select_service(
+      { phone: '971500', context: {}, preferredLanguage: 'en' },
+      { id: 'cust1' },
+      { text: 'my washing machine makes an odd sound' }
+    );
+
+    expect(sessionStore.setFlow).toHaveBeenCalledWith(
+      '971500', 'booking', 'awaiting_new_property',
+      expect.objectContaining({ serviceId: 'svc-appliance', serviceMatchSource: 'ai', serviceMatchConfidence: 0.91 })
+    );
+    expect(whatsapp.sendButtons).not.toHaveBeenCalled();
   });
 
   it('falls back to the service list for an ambiguous low-confidence request', async () => {
@@ -223,8 +240,28 @@ describe('booking flow — select_service step', () => {
 describe('booking flow — hybrid field collection', () => {
   beforeEach(resetAll);
 
-  it('prefills multiple fields and skips a matching saved address, date, and time', async () => {
+  it('skips service selection when the initial message says electrician', async () => {
+    fakeCrm.getServices.mockResolvedValue([{ id: 'svc-electrical', name: 'Electrical', category: 'electrical' }]);
+
+    await booking.startBooking({ phone: '971500', context: {} }, { id: 'cust1' }, {
+      text: 'I want to book electrician',
+      ai: { service: 'electrician', confidence: 0.96 },
+    });
+
+    expect(sessionStore.setFlow).toHaveBeenCalledWith(
+      '971500', 'booking', 'awaiting_new_property',
+      expect.objectContaining({ serviceId: 'svc-electrical', serviceMatchSource: 'semantic_hint' })
+    );
+    expect(whatsapp.sendListMessage).not.toHaveBeenCalled();
+    expect(whatsapp.sendButtons).not.toHaveBeenCalled();
+  });
+
+  it('prefills multiple fields and skips a matching service, address, date, and time', async () => {
     fakeCrm.getServices.mockResolvedValue([{ id: 'svc-plumbing', name: 'Plumbing', category: 'plumbing' }]);
+    fakeCrm.getCustomerProperties.mockResolvedValue([
+      { id: 'prop1', label: 'Kakkanad flat', addressLine: 'Kakkanad, Kochi', area: 'Kakkanad' },
+    ]);
+    fakeCrm.getAvailability.mockResolvedValue(['09:00', '17:00']);
     const session = { phone: '971500', context: {}, preferredLanguage: 'manglish' };
     await booking.startBooking(session, { id: 'cust1' }, {
       text: 'Nale evening Kakkanad flatil plumber venam, kitchen tap leak aanu',
@@ -233,26 +270,12 @@ describe('booking flow — hybrid field collection', () => {
         preferredDate: 'tomorrow', preferredTime: 'evening', confidence: 0.96,
       },
     });
-    const confirmationContext = sessionStore.setFlow.mock.calls.at(-1)[3];
-    expect(confirmationContext).toEqual(expect.objectContaining({
-      locationHint: 'Kakkanad flat', issue: 'Kitchen tap leaking', preferredTime: 'evening',
-    }));
-
-    resetAll();
-    fakeCrm.getServiceDetails.mockResolvedValue({ id: 'svc-plumbing', name: 'Plumbing' });
-    fakeCrm.getCustomerProperties.mockResolvedValue([
-      { id: 'prop1', label: 'Kakkanad flat', addressLine: 'Kakkanad, Kochi', area: 'Kakkanad' },
-    ]);
-    fakeCrm.getAvailability.mockResolvedValue(['09:00', '17:00']);
-    await booking.steps.confirm_service(
-      { phone: '971500', context: { ...confirmationContext, inferredServiceId: 'svc-plumbing' } },
-      { id: 'cust1' },
-      { buttonId: 'CONFIRM_INFERRED_SERVICE' }
-    );
-
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
       '971500', 'booking', 'review_item',
-      expect.objectContaining({ propertyId: 'prop1', time: '17:00' })
+      expect.objectContaining({
+        serviceId: 'svc-plumbing', propertyId: 'prop1', time: '17:00',
+        locationHint: 'Kakkanad flat', issue: 'Kitchen tap leaking', serviceMatchSource: 'deterministic',
+      })
     );
   });
 

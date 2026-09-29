@@ -19,6 +19,7 @@
   input[type=text] { flex: 1; padding: 0.5rem; border-radius: 6px; border: 1px solid #444; background: #16181d; color: #eee; }
   input[type=password] { width: 100%; box-sizing: border-box; margin-bottom: 0.5rem; padding: 0.5rem; border-radius: 6px; border: 1px solid #444; background: #16181d; color: #eee; }
   button[type=submit] { padding: 0.5rem 1rem; border-radius: 6px; border: none; background: #2563eb; color: white; cursor: pointer; }
+  #reset-session { margin: 0 0 0.8rem; padding: 0.45rem 0.8rem; border-radius: 6px; border: 1px solid #dc2626; background: transparent; color: #fca5a5; cursor: pointer; }
   button[type=submit]:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
   label { font-size: 0.8rem; opacity: 0.7; }
   .hint { font-size: 0.78rem; opacity: 0.55; margin: 0.4rem 0 1rem; }
@@ -35,6 +36,7 @@
 <label>Phone (any string, used as the customer's identity)</label>
 <input id="phone" type="text" value="971500000000" style="width:100%;margin-bottom:0.5rem;padding:0.5rem;border-radius:6px;border:1px solid #444;background:#16181d;color:#eee;" />
 <p class="hint">Type free text (e.g. "hi", "Nale AC service venam") or tap the buttons the bot sends — both drive the same conversation.</p>
+<button id="reset-session" type="button" hidden>Reset Test Session</button>
 <div id="log"></div>
 <form id="form">
   <input id="message" type="text" placeholder="Type a message…" autocomplete="off" />
@@ -49,12 +51,14 @@ const phoneInput = document.getElementById('phone');
 const secretInput = document.getElementById('secret');
 const statusEl = document.getElementById('status');
 const submitButton = form.querySelector('button[type=submit]');
+const resetButton = document.getElementById('reset-session');
 
 function setAvailability(enabled, message) {
   statusEl.textContent = message;
   statusEl.className = enabled ? 'enabled' : 'disabled';
   messageInput.disabled = !enabled;
   submitButton.disabled = !enabled;
+  resetButton.hidden = !enabled;
 }
 
 async function checkAvailability() {
@@ -142,7 +146,10 @@ async function sendMessage({ message, buttonId, label }) {
       }
       return;
     }
-    let meta = 'intent=' + data.intent + ' flow=' + data.flow + ' step=' + data.step;
+    let meta = 'intent=' + data.intent + ' flow=' + data.flow + ' step=' + data.step + ' confidence=' + data.confidence;
+    if (data.service) meta += '\nservice=' + data.service;
+    if (data.matchSource) meta += '\nmatch=' + data.matchSource;
+    if (data.serviceConfidence !== null) meta += '\nserviceConfidence=' + data.serviceConfidence;
     if (data.debugReason) meta += '\nwhy UNKNOWN: ' + data.debugReason;
     addMessage(
       'bot',
@@ -161,6 +168,34 @@ form.addEventListener('submit', (e) => {
   if (!message) return;
   messageInput.value = '';
   sendMessage({ message });
+});
+
+resetButton.addEventListener('click', async () => {
+  const phone = phoneInput.value.trim();
+  const secret = secretInput.value;
+  if (!phone || !secret) {
+    addMessage('bot', 'Enter the phone identity and developer secret before resetting.');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/chat/test/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-test-chat-secret': secret },
+      body: JSON.stringify({ phone }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      addMessage('bot', data.code === 'TEST_CHAT_UNAUTHORIZED'
+        ? 'The developer secret is invalid.'
+        : (data.error || 'Unable to reset the test session.'));
+      return;
+    }
+    log.replaceChildren();
+    addMessage('bot', data.message || 'Test session reset.');
+  } catch (err) {
+    addMessage('bot', 'Reset failed: ' + err.message);
+  }
 });
 
 checkAvailability();

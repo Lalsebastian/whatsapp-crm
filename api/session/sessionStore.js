@@ -60,6 +60,23 @@ async function clearFlow(phone) {
   return updateSession(phone, { currentFlow: null, currentStep: null, context: {} });
 }
 
+// Developer test-console reset: clear conversational state for exactly one
+// phone identity without deleting its customer, properties, bookings, or
+// complaints. Also releases human takeover so the next greeting is fresh.
+async function resetSession(phone) {
+  const payload = {
+    state: 'IDLE',
+    data: {},
+    current_flow: null,
+    current_step: null,
+    context: {},
+    human_takeover: false,
+    last_activity_at: new Date().toISOString(),
+  };
+  const updated = await db.patch('sessions', `phone=eq.${encodeURIComponent(phone)}`, payload);
+  return updated && updated.length > 0 ? mapSession(updated[0]) : null;
+}
+
 async function setHumanTakeover(phone, value) {
   return updateSession(phone, { humanTakeover: value });
 }
@@ -77,4 +94,4 @@ function isExpired(session, now = Date.now()) {
   return now - lastActivity > reliability.SESSION_TTL_MINUTES * 60 * 1000;
 }
 
-module.exports = { getOrCreateSession, updateSession, setFlow, clearFlow, setHumanTakeover, touchActivity, isExpired };
+module.exports = { getOrCreateSession, updateSession, setFlow, clearFlow, resetSession, setHumanTakeover, touchActivity, isExpired };
