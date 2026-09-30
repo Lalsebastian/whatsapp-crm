@@ -1,32 +1,48 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
+  Activity,
   AlertTriangle,
+  ArrowRight,
   BadgeCheck,
   CalendarDays,
+  ChevronRight,
+  CircleAlert,
+  Gauge,
+  MessageSquareWarning,
   Receipt,
+  Sparkles,
   Star,
   TrendingUp,
+  UsersRound,
   Wrench,
 } from 'lucide-react';
 import { getOverview, getServiceMix } from '@/lib/api/analytics';
-import { listBookings, listEscalations, queryKeys } from '@/lib/api';
+import { listBookings, listComplaints, listEscalations, queryKeys } from '@/lib/api';
 import { useLiveUpdates } from '@/hooks/useRealtime';
 import {
   formatCompactCurrency,
   formatCurrency,
+  formatDate,
+  formatDateTime,
   formatNumber,
   formatPercent,
+  formatPhone,
 } from '@/lib/utils';
 import { BOOKING_STATUS, complaintStatus } from '@/lib/status';
 import { ChartPanel, ViewShell } from '@/components/layout/ViewShell';
 import { useModule } from '@/hooks/useModule';
 import { KpiCard, KpiGrid } from '@/components/data/KpiCard';
 import { StatusBadge, StatusDot } from '@/components/data/StatusBadge';
-import { RangePicker } from '@/components/data/FilterBar';
+import { FilterBar, RangePicker } from '@/components/data/FilterBar';
 import { ErrorState, PanelSkeleton } from '@/components/data/EmptyState';
+import { DataTable } from '@/components/data/DataTable';
+import { RecordDrawer } from '@/components/data/RecordDrawer';
+import { SavedViews } from '@/components/data/SavedViews';
 import { MixChart, RevenueChart, VolumeChart } from '@/components/charts/Charts';
 import { UtilizationChart } from '@/components/charts/TrendCharts';
+import { Button } from '@/components/ui/button';
+import { Panel, PanelBody, PanelHeader, PanelTitle } from '@/components/layout/Panel';
 
 /*
  * Owner / Manager — the business view.
@@ -36,7 +52,7 @@ import { UtilizationChart } from '@/components/charts/TrendCharts';
  * first question about "conversion rate" is always "out of what".
  */
 export function OwnerDashboard() {
-  const { active } = useModule('overview');
+  const { active, setModule } = useModule('overview');
   const [range, setRange] = useState('30d');
 
   // Bookings and complaints feed the tiles and the charts, so a status change
@@ -55,7 +71,7 @@ export function OwnerDashboard() {
 
   if (overview.isError) {
     return (
-      <ViewShell title="Overview" description="Business performance at a glance">
+      <ViewShell title="Executive overview" description="Performance, priorities and customer operations">
         <ErrorState error={overview.error} onRetry={overview.refetch} />
       </ViewShell>
     );
@@ -63,7 +79,7 @@ export function OwnerDashboard() {
 
   if (overview.isLoading) {
     return (
-      <ViewShell title="Overview" description="Business performance at a glance">
+      <ViewShell title="Executive overview" description="Preparing your business command centre">
         <KpiGrid>
           {Array.from({ length: 6 }, (_, i) => (
             <KpiCard key={i} label="Loading…" value="—" loading />
@@ -77,7 +93,7 @@ export function OwnerDashboard() {
     );
   }
 
-  const { kpis, series, daily, utilisation } = overview.data;
+  const { kpis, series, daily, utilisation, comparison } = overview.data;
 
   if (active === 'bookings') return <OwnerBookings overview={overview.data} />;
   if (active === 'complaints') return <OwnerComplaints overview={overview.data} />;
@@ -85,8 +101,8 @@ export function OwnerDashboard() {
 
   return (
     <ViewShell
-      title="Overview"
-      description="Business performance at a glance"
+      title="Executive overview"
+      description="Performance, priorities and customer operations in one command centre"
       actions={<RangePicker value={range} onChange={setRange} />}
     >
       {overview.data.warnings?.length ? (
@@ -94,6 +110,19 @@ export function OwnerDashboard() {
           Some optional analytics are unavailable: {overview.data.warnings.join(' · ')}
         </div>
       ) : null}
+
+      <ExecutiveHero
+        kpis={kpis}
+        utilisation={utilisation}
+        range={range}
+        onNavigate={setModule}
+      />
+
+      <SectionHeading
+        eyebrow="Performance pulse"
+        title="The numbers that move the business"
+        description="Every metric is calculated from the selected reporting period."
+      />
       <KpiGrid>
         <KpiCard
           label="Revenue"
@@ -101,6 +130,7 @@ export function OwnerDashboard() {
           icon={Receipt}
           tone="primary"
           hint={`Sum of ${formatNumber(kpis.completed)} completed jobs in this period`}
+          delta={comparisonDelta(comparison?.revenue)}
         />
         <KpiCard
           label="Bookings"
@@ -108,6 +138,7 @@ export function OwnerDashboard() {
           icon={CalendarDays}
           tone="info"
           hint={`${kpis.completed} completed, ${kpis.cancelled} cancelled`}
+          delta={comparisonDelta(comparison?.bookings)}
         />
         <KpiCard
           label="Avg ticket"
@@ -147,21 +178,34 @@ export function OwnerDashboard() {
         />
       </KpiGrid>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <SectionHeading
+        eyebrow="Decision intelligence"
+        title="See momentum and pressure points"
+        description="Use the operational pulse to move directly into the records behind each signal."
+      />
+
+      <div className="grid gap-4 xl:grid-cols-12">
         <ChartPanel
           title="Revenue over time"
           description="Completed jobs, by scheduled date"
-          className="lg:col-span-2"
+          className="xl:col-span-8"
         >
-          <RevenueChart data={daily} height={260} />
+          <RevenueChart data={daily} height={290} />
         </ChartPanel>
 
-        <ChartPanel title="Funnel" description="Distinct customers at each step">
-          <FunnelList funnel={series.funnel} />
-        </ChartPanel>
+        <OperationalPulse
+          kpis={kpis}
+          bookingsByStatus={series.bookingsByStatus}
+          onNavigate={setModule}
+          className="xl:col-span-4"
+        />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <ChartPanel title="Customer journey" description="Distinct customers at each step">
+          <FunnelList funnel={series.funnel} />
+        </ChartPanel>
+
         <ChartPanel title="Bookings by status" description="Volume across the pipeline">
           <VolumeChart
             data={series.bookingsByStatus}
@@ -189,16 +233,251 @@ export function OwnerDashboard() {
         </ChartPanel>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartPanel title="Complaint categories" description="What customers are actually complaining about">
+      <div className="grid gap-4 xl:grid-cols-12">
+        <ChartPanel
+          title="Complaint categories"
+          description="What customers are actually complaining about"
+          className="xl:col-span-4"
+        >
           <ComplaintCategoryList data={series.complaintsByCategory} />
         </ChartPanel>
 
-        <ChartPanel title="Unanswered CSAT surveys" description="Sent, no reply yet">
+        <ChartPanel title="Unanswered CSAT surveys" description="Sent, no reply yet" className="xl:col-span-4">
           <UnansweredSurveys count={kpis.csatPending} />
+        </ChartPanel>
+
+        <ChartPanel
+          title="Recent bookings"
+          description="Latest customer activity"
+          className="xl:col-span-4"
+          actions={
+            <Button variant="ghost" size="sm" onClick={() => setModule('bookings')}>
+              View all <ArrowRight />
+            </Button>
+          }
+        >
+          <RecentBookings limit={6} compact />
         </ChartPanel>
       </div>
     </ViewShell>
+  );
+}
+
+function SectionHeading({ eyebrow, title, description }) {
+  return (
+    <div className="dashboard-section-heading flex flex-wrap items-end justify-between gap-3 pt-2">
+      <div>
+        <div className="text-info dark:text-primary text-[10px] font-bold tracking-[0.24em] uppercase">{eyebrow}</div>
+        <h2 className="mt-1 text-base font-semibold tracking-tight md:text-lg">{title}</h2>
+      </div>
+      <p className="text-muted-foreground max-w-xl text-xs md:text-sm">{description}</p>
+    </div>
+  );
+}
+
+function comparisonDelta(value) {
+  if (value == null || !Number.isFinite(value)) return null;
+  return {
+    label: `${value > 0 ? '+' : ''}${formatPercent(value)} vs previous period`,
+    tone: value < 0 ? 'negative' : 'positive',
+  };
+}
+
+function ExecutiveHero({ kpis, utilisation, range, onNavigate }) {
+  const activeBookings = Math.max(0, kpis.bookings - kpis.completed - kpis.cancelled);
+  const completion = kpis.completionRate ?? 0;
+  const periodLabel = range === 'all' ? 'all recorded time' : `the last ${range.replace('d', ' days')}`;
+  const priorities = [
+    {
+      label: 'Open complaints',
+      value: kpis.openComplaints,
+      detail: kpis.openComplaints ? 'Customer follow-up needed' : 'Customer care is clear',
+      icon: MessageSquareWarning,
+      tone: kpis.openComplaints ? 'warning' : 'success',
+      target: 'complaints',
+    },
+    {
+      label: 'Active bookings',
+      value: activeBookings,
+      detail: activeBookings ? 'Moving through operations' : 'No jobs waiting',
+      icon: Activity,
+      tone: 'info',
+      target: 'bookings',
+    },
+    {
+      label: 'Awaiting feedback',
+      value: kpis.csatPending,
+      detail: kpis.csatPending ? 'Survey responses pending' : 'Feedback is up to date',
+      icon: Star,
+      tone: kpis.csatPending ? 'primary' : 'success',
+      target: 'complaints',
+    },
+  ];
+
+  return (
+    <section className="executive-hero relative overflow-hidden rounded-[1.75rem] border border-primary/15 p-5 shadow-[0_24px_70px_rgba(7,38,91,.10)] md:p-7">
+      <div className="executive-hero-orbit" aria-hidden="true" />
+      <div className="relative grid gap-7 xl:grid-cols-[1.35fr_.9fr] xl:items-stretch">
+        <div className="flex flex-col justify-between gap-7">
+          <div>
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-background/70 px-3 py-1.5 text-[11px] font-semibold shadow-sm backdrop-blur">
+              <span className="relative flex size-2">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60 motion-reduce:animate-none" />
+                <span className="relative inline-flex size-2 rounded-full bg-success" />
+              </span>
+              Live business command centre
+            </div>
+            <h2 className="max-w-2xl text-2xl leading-tight font-semibold tracking-[-0.035em] md:text-4xl">
+              Clarity for every decision,
+              <span className="hero-gradient-text block">from booking to customer delight.</span>
+            </h2>
+            <p className="text-muted-foreground mt-3 max-w-2xl text-sm leading-6 md:text-base">
+              A live operating picture for {periodLabel}, with the signals that need your attention brought forward.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Button onClick={() => onNavigate('bookings')}>
+              Explore bookings <ArrowRight />
+            </Button>
+            <Button variant="outline" onClick={() => onNavigate('complaints')}>
+              Review customer care
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            <HeroMetric label="Completion" value={formatPercent(completion)} icon={BadgeCheck} />
+            <HeroMetric
+              label="Team capacity"
+              value={utilisation.overall == null ? '—' : formatPercent(utilisation.overall)}
+              icon={Gauge}
+            />
+            <HeroMetric label="Conversations" value={formatNumber(kpis.conversations)} icon={UsersRound} />
+          </div>
+        </div>
+
+        <div className="executive-priority-card rounded-[1.35rem] border border-white/40 bg-background/72 p-3 shadow-xl shadow-primary/5 backdrop-blur-xl md:p-4">
+          <div className="mb-2 flex items-center justify-between px-1 py-1">
+            <div>
+              <div className="text-sm font-semibold">Priority radar</div>
+              <div className="text-muted-foreground text-xs">Where to focus next</div>
+            </div>
+            <div className="surreal-icon flex size-9 items-center justify-center bg-primary/10 text-primary">
+              <Sparkles className="size-4" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            {priorities.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => onNavigate(item.target)}
+                  className="priority-row group flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-3 text-left transition-all hover:border-primary/15 hover:bg-background/85 hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <span className={`priority-icon priority-icon-${item.tone}`}>
+                    <Icon className="size-4" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-xs font-semibold">{item.label}</span>
+                    <span className="text-muted-foreground block truncate text-[11px]">{item.detail}</span>
+                  </span>
+                  <span className="tabular text-xl font-semibold">{formatNumber(item.value)}</span>
+                  <ChevronRight className="text-muted-foreground size-4 transition-transform group-hover:translate-x-1" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HeroMetric({ label, value, icon: Icon }) {
+  return (
+    <div className="hero-metric min-w-0 rounded-xl border border-primary/10 bg-background/55 p-3 backdrop-blur-sm">
+      <div className="text-muted-foreground flex items-center gap-1.5 text-[10px] font-semibold tracking-wide uppercase">
+        <Icon className="size-3.5" /> {label}
+      </div>
+      <div className="tabular mt-1.5 truncate text-lg font-semibold md:text-xl">{value}</div>
+    </div>
+  );
+}
+
+function OperationalPulse({ kpis, bookingsByStatus, onNavigate, className }) {
+  const active = (bookingsByStatus ?? []).filter((row) => !['completed', 'cancelled'].includes(row.label));
+  const max = Math.max(1, ...active.map((row) => row.count));
+
+  return (
+    <Panel className={className}>
+      <div className="border-border/70 flex items-start justify-between border-b px-4 py-3">
+        <div>
+          <div className="text-sm font-semibold">Operational pulse</div>
+          <div className="text-muted-foreground text-xs">Live work requiring visibility</div>
+        </div>
+        <span className="flex items-center gap-1.5 rounded-full bg-success/10 px-2 py-1 text-[10px] font-semibold text-success">
+          <span className="size-1.5 rounded-full bg-success" /> Live
+        </span>
+      </div>
+      <div className="flex flex-1 flex-col p-4">
+        <div className="grid grid-cols-2 gap-2">
+          <PulseStat label="Open complaints" value={kpis.openComplaints} tone="warning" />
+          <PulseStat label="Escalated cases" value={kpis.escalatedComplaints} tone="destructive" />
+        </div>
+
+        <div className="mt-5 flex-1">
+          <div className="text-muted-foreground mb-3 text-[10px] font-bold tracking-[0.18em] uppercase">Active pipeline</div>
+          {active.length ? (
+            <ul className="space-y-3">
+              {active.slice(0, 4).map((row) => {
+                const status = BOOKING_STATUS[row.label] ?? { label: humanise(row.label), tone: 'neutral' };
+                return (
+                  <li key={row.label}>
+                    <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
+                      <span className="flex items-center gap-2"><StatusDot tone={status.tone} />{status.label}</span>
+                      <span className="tabular font-semibold">{row.count}</span>
+                    </div>
+                    <div className="bg-muted h-1.5 overflow-hidden rounded-full">
+                      <div
+                        className="joboy-gradient h-full rounded-full transition-[width] duration-700"
+                        style={{ width: `${Math.max(8, (row.count / max) * 100)}%` }}
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <div className="text-muted-foreground flex h-28 flex-col items-center justify-center gap-2 text-center text-xs">
+              <BadgeCheck className="size-6 text-success" /> No active bookings waiting.
+            </div>
+          )}
+        </div>
+
+        <Button variant="outline" size="sm" className="mt-5 w-full" onClick={() => onNavigate('bookings')}>
+          Open booking pipeline <ChevronRight />
+        </Button>
+      </div>
+    </Panel>
+  );
+}
+
+function PulseStat({ label, value, tone }) {
+  const iconTone = {
+    warning: 'text-warning',
+    destructive: 'text-destructive',
+  }[tone] ?? 'text-primary';
+
+  return (
+    <div className="rounded-xl border border-border/70 bg-muted/35 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-muted-foreground text-[11px]">{label}</span>
+        <CircleAlert className={`size-3.5 ${iconTone}`} />
+      </div>
+      <div className="tabular mt-1 text-xl font-semibold">{formatNumber(value)}</div>
+    </div>
   );
 }
 
@@ -336,38 +615,138 @@ function OwnerBookings({ overview }) {
         </ChartPanel>
       </div>
 
-      <ChartPanel title="Recent bookings" description="Latest 15 by scheduled date">
-        <RecentBookings />
-      </ChartPanel>
+      <OwnerBookingRecords />
     </ViewShell>
   );
 }
 
-function RecentBookings() {
-  const { data, isLoading } = useQuery({
+function OwnerBookingRecords() {
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('all');
+  const [detail, setDetail] = useState(null);
+  const bookings = useQuery({
+    queryKey: ['bookings', 'owner-records'],
+    queryFn: () => listBookings({}),
+  });
+
+  if (bookings.isError) return <ErrorState error={bookings.error} onRetry={bookings.refetch} />;
+
+  const rows = (bookings.data ?? []).filter((booking) => {
+    if (status !== 'all' && booking.status !== status) return false;
+    if (!search) return true;
+    const needle = search.toLowerCase();
+    return [booking.reference, booking.service?.name, booking.customer?.name, booking.customer?.phone]
+      .some((value) => String(value ?? '').toLowerCase().includes(needle));
+  });
+
+  const columns = [
+    { key: 'reference', header: 'Reference', cell: (row) => <span className="tabular font-medium">{row.reference}</span> },
+    { key: 'service', header: 'Service', sortValue: (row) => row.service?.name, cell: (row) => row.service?.name ?? '—' },
+    { key: 'customer', header: 'Customer', sortValue: (row) => row.customer?.name ?? row.customer?.phone, cell: (row) => row.customer?.name ?? formatPhone(row.customer?.phone) },
+    { key: 'scheduled_date', header: 'Scheduled', cell: (row) => <span className="text-xs">{formatDate(row.scheduled_date)} {row.scheduled_time?.slice(0, 5) ?? ''}</span> },
+    { key: 'price', header: 'Value', sortValue: (row) => Number(row.price) || 0, cell: (row) => <span className="tabular">{formatCurrency(row.price)}</span> },
+    { key: 'status', header: 'Status', cell: (row) => <StatusBadge tone={BOOKING_STATUS[row.status]?.tone ?? 'neutral'}>{BOOKING_STATUS[row.status]?.label ?? humanise(row.status)}</StatusBadge> },
+  ];
+
+  return (
+    <>
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search booking, service or customer"
+        onReset={() => { setSearch(''); setStatus('all'); }}
+      >
+        <select
+          value={status}
+          onChange={(event) => setStatus(event.target.value)}
+          className="bg-background h-9 rounded-md border px-2 text-sm"
+          aria-label="Filter bookings by status"
+        >
+          <option value="all">All statuses</option>
+          {Object.entries(BOOKING_STATUS).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
+        </select>
+      </FilterBar>
+      <SavedViews
+        storageKey="joboy.views.owner.bookings"
+        value={{ search, status }}
+        onApply={(filters) => { setSearch(filters.search ?? ''); setStatus(filters.status ?? 'all'); }}
+        presets={[
+          { name: 'All bookings', filters: { search: '', status: 'all' } },
+          { name: 'Pending', filters: { search: '', status: 'pending' } },
+          { name: 'In progress', filters: { search: '', status: 'in_progress' } },
+        ]}
+      />
+      <Panel className="min-h-[30rem]">
+        <PanelHeader>
+          <div>
+            <PanelTitle>Booking records</PanelTitle>
+            <div className="text-muted-foreground text-xs">{rows.length} of {(bookings.data ?? []).length} records</div>
+          </div>
+        </PanelHeader>
+        <PanelBody scroll={false}>
+          <DataTable
+            columns={columns}
+            rows={rows}
+            loading={bookings.isLoading}
+            onRowClick={setDetail}
+            pageSize={15}
+            emptyTitle="No bookings found"
+            hasFilters={Boolean(search) || status !== 'all'}
+            onClearFilters={() => { setSearch(''); setStatus('all'); }}
+          />
+        </PanelBody>
+      </Panel>
+      <RecordDrawer
+        record={detail}
+        title={detail?.reference ?? 'Booking details'}
+        description="Complete booking and customer information"
+        onClose={() => setDetail(null)}
+        fields={detail ? [
+          ['Service', detail.service?.name],
+          ['Customer', detail.customer?.name],
+          ['Phone', formatPhone(detail.customer?.phone)],
+          ['Scheduled', `${formatDate(detail.scheduled_date)} ${detail.scheduled_time?.slice(0, 5) ?? ''}`],
+          ['Status', BOOKING_STATUS[detail.status]?.label ?? humanise(detail.status)],
+          ['Value', formatCurrency(detail.price)],
+          ['Notes', detail.notes],
+          ['Created', formatDateTime(detail.created_at)],
+        ] : []}
+        timeline={detail ? [
+          { label: 'Booking created', value: formatDateTime(detail.created_at) },
+          { label: 'Service scheduled', value: `${formatDate(detail.scheduled_date)} ${detail.scheduled_time?.slice(0, 5) ?? ''}` },
+          { label: `Current status · ${BOOKING_STATUS[detail.status]?.label ?? humanise(detail.status)}`, value: formatDateTime(detail.updated_at) },
+        ] : []}
+      />
+    </>
+  );
+}
+
+function RecentBookings({ limit = 15, compact = false }) {
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['bookings', 'recent-owner'],
     queryFn: () => listBookings({}),
   });
 
   if (isLoading) return <PanelSkeleton rows={5} />;
+  if (error) return <ErrorState error={error} onRetry={refetch} compact />;
   if (!data?.length) {
     return <p className="text-muted-foreground py-8 text-center text-sm">No bookings yet.</p>;
   }
 
   return (
     <ul className="divide-border divide-y">
-      {data.slice(0, 15).map((booking) => {
+      {data.slice(0, limit).map((booking) => {
         const status = BOOKING_STATUS[booking.status];
         return (
-          <li key={booking.id} className="flex items-center gap-3 py-2.5 text-sm">
-            <span className="tabular text-muted-foreground w-24 shrink-0 truncate text-xs">
+          <li key={booking.id} className="flex items-center gap-2.5 py-2.5 text-sm">
+            <span className={`tabular text-muted-foreground shrink-0 truncate text-xs ${compact ? 'w-16' : 'w-24'}`}>
               {booking.reference}
             </span>
             <span className="min-w-0 flex-1 truncate">{booking.service?.name ?? '—'}</span>
-            <span className="text-muted-foreground hidden w-32 shrink-0 truncate text-xs sm:block">
+            <span className={`text-muted-foreground hidden shrink-0 truncate text-xs sm:block ${compact ? 'w-24 xl:hidden' : 'w-32'}`}>
               {booking.customer?.name ?? booking.customer?.phone ?? '—'}
             </span>
-            <span className="tabular w-20 shrink-0 text-right text-xs">
+            <span className={`tabular shrink-0 text-right text-xs ${compact ? 'w-16' : 'w-20'}`}>
               {formatCurrency(booking.price)}
             </span>
             {status ? <StatusBadge tone={status.tone}>{status.label}</StatusBadge> : null}
@@ -402,40 +781,228 @@ function OwnerComplaints({ overview }) {
           </ul>
         </ChartPanel>
       </div>
+      <OwnerComplaintRecords />
     </ViewShell>
   );
 }
 
+function OwnerComplaintRecords() {
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('all');
+  const [detail, setDetail] = useState(null);
+  const complaints = useQuery({
+    queryKey: ['complaints', 'owner-records'],
+    queryFn: () => listComplaints({}),
+  });
+
+  if (complaints.isError) return <ErrorState error={complaints.error} onRetry={complaints.refetch} />;
+
+  const rows = (complaints.data ?? []).filter((complaint) => {
+    if (status !== 'all' && complaint.status !== status) return false;
+    if (!search) return true;
+    const needle = search.toLowerCase();
+    return [complaint.reference, complaint.category, complaint.description, complaint.customer?.name, complaint.customer?.phone]
+      .some((value) => String(value ?? '').toLowerCase().includes(needle));
+  });
+
+  const columns = [
+    { key: 'reference', header: 'Reference', cell: (row) => <span className="tabular font-medium">{row.reference}</span> },
+    { key: 'category', header: 'Category', cell: (row) => humanise(row.category) },
+    { key: 'customer', header: 'Customer', sortValue: (row) => row.customer?.name ?? row.customer?.phone, cell: (row) => row.customer?.name ?? formatPhone(row.customer?.phone) },
+    { key: 'created_at', header: 'Created', cell: (row) => <span className="text-xs">{formatDate(row.created_at)}</span> },
+    { key: 'status', header: 'Status', cell: (row) => { const meta = complaintStatus(row.status); return <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge>; } },
+  ];
+
+  return (
+    <>
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search complaint, category or customer"
+        onReset={() => { setSearch(''); setStatus('all'); }}
+      >
+        <select
+          value={status}
+          onChange={(event) => setStatus(event.target.value)}
+          className="bg-background h-9 rounded-md border px-2 text-sm"
+          aria-label="Filter complaints by status"
+        >
+          <option value="all">All statuses</option>
+          {['open', 'in_progress', 'resolved', 'closed', 'escalated'].map((value) => (
+            <option key={value} value={value}>{complaintStatus(value).label}</option>
+          ))}
+        </select>
+      </FilterBar>
+      <SavedViews
+        storageKey="joboy.views.owner.complaints"
+        value={{ search, status }}
+        onApply={(filters) => { setSearch(filters.search ?? ''); setStatus(filters.status ?? 'all'); }}
+        presets={[
+          { name: 'All complaints', filters: { search: '', status: 'all' } },
+          { name: 'Open', filters: { search: '', status: 'open' } },
+          { name: 'Escalated', filters: { search: '', status: 'escalated' } },
+        ]}
+      />
+      <Panel className="min-h-[26rem]">
+        <PanelHeader>
+          <div>
+            <PanelTitle>Complaint records</PanelTitle>
+            <div className="text-muted-foreground text-xs">{rows.length} of {(complaints.data ?? []).length} records</div>
+          </div>
+        </PanelHeader>
+        <PanelBody scroll={false}>
+          <DataTable
+            columns={columns}
+            rows={rows}
+            loading={complaints.isLoading}
+            onRowClick={setDetail}
+            pageSize={15}
+            emptyTitle="No complaints found"
+            hasFilters={Boolean(search) || status !== 'all'}
+            onClearFilters={() => { setSearch(''); setStatus('all'); }}
+          />
+        </PanelBody>
+      </Panel>
+      <RecordDrawer
+        record={detail}
+        title={detail?.reference ?? 'Complaint details'}
+        description="Customer complaint and linked booking information"
+        onClose={() => setDetail(null)}
+        fields={detail ? [
+          ['Category', humanise(detail.category)],
+          ['Status', complaintStatus(detail.status).label],
+          ['Customer', detail.customer?.name],
+          ['Phone', formatPhone(detail.customer?.phone)],
+          ['Linked booking', detail.booking?.reference ?? 'Not linked'],
+          ['Description', detail.description],
+          ['Created', formatDateTime(detail.created_at)],
+        ] : []}
+        timeline={detail ? [
+          { label: 'Complaint reported', value: formatDateTime(detail.created_at) },
+          { label: `Current status · ${complaintStatus(detail.status).label}`, value: formatDateTime(detail.updated_at) },
+        ] : []}
+      />
+    </>
+  );
+}
+
 function OwnerEscalations() {
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('all');
+  const [detail, setDetail] = useState(null);
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['escalations', 'owner'],
     queryFn: () => listEscalations({}),
   });
 
   if (error) return <ErrorState error={error} onRetry={refetch} />;
-  if (isLoading) return <PanelSkeleton rows={5} />;
+
+  const rows = (data ?? []).filter((escalation) => {
+    if (status !== 'all' && escalation.status !== status) return false;
+    if (!search) return true;
+    const needle = search.toLowerCase();
+    return [escalation.phone, escalation.customer?.name, escalation.reason, escalation.conversation_summary]
+      .some((value) => String(value ?? '').toLowerCase().includes(needle));
+  });
+
+  const columns = [
+    { key: 'customer', header: 'Customer', sortValue: (row) => row.customer?.name ?? row.phone, cell: (row) => row.customer?.name ?? formatPhone(row.phone) },
+    { key: 'phone', header: 'Phone', cell: (row) => <span className="tabular text-xs">{formatPhone(row.phone)}</span> },
+    { key: 'reason', header: 'Reason', cell: (row) => <span className="line-clamp-1 max-w-md">{row.reason ?? '—'}</span> },
+    { key: 'created_at', header: 'Created', cell: (row) => <span className="text-xs">{formatDateTime(row.created_at)}</span> },
+    { key: 'status', header: 'Status', cell: (row) => <StatusBadge tone={row.status === 'resolved' ? 'success' : row.status === 'acknowledged' ? 'info' : 'warning'}>{humanise(row.status)}</StatusBadge> },
+  ];
+
+  const openCount = (data ?? []).filter((row) => row.status !== 'resolved').length;
 
   return (
     <ViewShell title="Escalations" description="Conversations handed off to a human">
-      <ChartPanel title="All escalations" description={`${data?.length ?? 0} total`}>
-        {!data?.length ? (
-          <p className="text-muted-foreground py-12 text-center text-sm">No escalations.</p>
-        ) : (
-          <ul className="divide-border divide-y">
-            {data.map((esc) => (
-              <li key={esc.id} className="flex flex-wrap items-center gap-3 py-3 text-sm">
-                <span className="tabular text-muted-foreground w-28 shrink-0 text-xs">
-                  {esc.phone}
-                </span>
-                <span className="min-w-0 flex-1 truncate">{esc.reason ?? '—'}</span>
-                <StatusBadge tone={esc.status === 'resolved' ? 'success' : 'warning'}>
-                  {esc.status}
-                </StatusBadge>
-              </li>
-            ))}
-          </ul>
-        )}
-      </ChartPanel>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <QueueMetric label="Total escalations" value={(data ?? []).length} tone="info" />
+        <QueueMetric label="Needs attention" value={openCount} tone={openCount ? 'warning' : 'success'} />
+        <QueueMetric label="Resolved" value={(data ?? []).length - openCount} tone="success" />
+      </div>
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search customer, phone, reason or summary"
+        onReset={() => { setSearch(''); setStatus('all'); }}
+      >
+        <select
+          value={status}
+          onChange={(event) => setStatus(event.target.value)}
+          className="bg-background h-9 rounded-md border px-2 text-sm"
+          aria-label="Filter escalations by status"
+        >
+          <option value="all">All statuses</option>
+          <option value="open">Open</option>
+          <option value="acknowledged">Acknowledged</option>
+          <option value="resolved">Resolved</option>
+        </select>
+      </FilterBar>
+      <SavedViews
+        storageKey="joboy.views.owner.escalations"
+        value={{ search, status }}
+        onApply={(filters) => { setSearch(filters.search ?? ''); setStatus(filters.status ?? 'all'); }}
+        presets={[
+          { name: 'All escalations', filters: { search: '', status: 'all' } },
+          { name: 'Open', filters: { search: '', status: 'open' } },
+          { name: 'Resolved', filters: { search: '', status: 'resolved' } },
+        ]}
+      />
+      <Panel className="min-h-[30rem]">
+        <PanelHeader>
+          <div>
+            <PanelTitle>Escalation queue</PanelTitle>
+            <div className="text-muted-foreground text-xs">{rows.length} of {(data ?? []).length} records</div>
+          </div>
+        </PanelHeader>
+        <PanelBody scroll={false}>
+          <DataTable
+            columns={columns}
+            rows={rows}
+            loading={isLoading}
+            onRowClick={setDetail}
+            pageSize={15}
+            emptyTitle="No escalations found"
+            hasFilters={Boolean(search) || status !== 'all'}
+            onClearFilters={() => { setSearch(''); setStatus('all'); }}
+          />
+        </PanelBody>
+      </Panel>
+      <RecordDrawer
+        record={detail}
+        title={detail?.customer?.name ?? formatPhone(detail?.phone)}
+        description="Escalation context and current handling status"
+        onClose={() => setDetail(null)}
+        fields={detail ? [
+          ['Phone', formatPhone(detail.phone)],
+          ['Status', humanise(detail.status)],
+          ['Reason', detail.reason],
+          ['Conversation summary', detail.conversation_summary],
+          ['Created', formatDateTime(detail.created_at)],
+          ['Resolved', detail.resolved_at ? formatDateTime(detail.resolved_at) : 'Not resolved'],
+        ] : []}
+        timeline={detail ? [
+          { label: 'Escalation created', value: formatDateTime(detail.created_at) },
+          { label: `Current status · ${humanise(detail.status)}`, value: detail.resolved_at ? formatDateTime(detail.resolved_at) : 'Awaiting resolution' },
+        ] : []}
+      />
     </ViewShell>
+  );
+}
+
+function QueueMetric({ label, value, tone = 'info' }) {
+  const tones = {
+    info: 'border-info/20 bg-info/7 text-info',
+    warning: 'border-warning/25 bg-warning/8 text-warning',
+    success: 'border-success/20 bg-success/7 text-success',
+  };
+
+  return (
+    <div className={`rounded-2xl border p-4 ${tones[tone] ?? tones.info}`}>
+      <div className="text-xs font-medium opacity-80">{label}</div>
+      <div className="tabular mt-1 text-2xl font-semibold">{formatNumber(value)}</div>
+    </div>
   );
 }

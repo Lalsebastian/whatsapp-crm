@@ -32,15 +32,9 @@ import { FilterBar } from '@/components/data/FilterBar';
 import { ErrorState, PanelSkeleton } from '@/components/data/EmptyState';
 import { KanbanBoard } from '@/components/data/KanbanBoard';
 import { DataTable } from '@/components/data/DataTable';
+import { RecordDrawer } from '@/components/data/RecordDrawer';
 import { Button } from '@/components/ui/button';
 import { MessageSquareOff, MessagesSquare } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 
 /*
  * Operations Agent.
@@ -231,57 +225,49 @@ function NoSendControl() {
 
 function ComplaintDetail({ complaint, onOpenChange }) {
   return (
-    <Dialog open={Boolean(complaint)} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{complaint?.reference ?? 'Complaint details'}</DialogTitle>
-          <DialogDescription>Complaint details and current workflow state.</DialogDescription>
-        </DialogHeader>
-        {complaint ? (
-          <dl className="grid gap-3 text-sm sm:grid-cols-2">
-            <Detail label="Status" value={complaintStatus(complaint.status).label} />
-            <Detail label="Category" value={humanise(complaint.category)} />
-            <Detail label="Customer" value={complaint.customer?.name ?? formatPhone(complaint.customer?.phone)} />
-            <Detail label="Created" value={formatDateTime(complaint.created_at)} />
-            <Detail className="sm:col-span-2" label="Description" value={complaint.description ?? '—'} />
-            <Detail className="sm:col-span-2" label="Agent notes" value={complaint.agent_notes ?? '—'} />
-          </dl>
-        ) : null}
-      </DialogContent>
-    </Dialog>
+    <RecordDrawer
+      record={complaint}
+      title={complaint?.reference ?? 'Complaint details'}
+      description="Complaint details and current workflow state."
+      onClose={() => onOpenChange(false)}
+      fields={complaint ? [
+        ['Status', complaintStatus(complaint.status).label],
+        ['Category', humanise(complaint.category)],
+        ['Customer', complaint.customer?.name ?? formatPhone(complaint.customer?.phone)],
+        ['Created', formatDateTime(complaint.created_at)],
+        ['Description', complaint.description],
+        ['Notes', complaint.agent_notes],
+      ] : []}
+      timeline={complaint ? [
+        { label: 'Complaint reported', value: formatDateTime(complaint.created_at) },
+        { label: `Current status · ${complaintStatus(complaint.status).label}`, value: formatDateTime(complaint.updated_at) },
+      ] : []}
+    />
   );
 }
 
 function BookingDetail({ booking, onOpenChange }) {
   return (
-    <Dialog open={Boolean(booking)} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{booking?.reference ?? 'Booking details'}</DialogTitle>
-          <DialogDescription>Booking schedule, customer and service details.</DialogDescription>
-        </DialogHeader>
-        {booking ? (
-          <dl className="grid gap-3 text-sm sm:grid-cols-2">
-            <Detail label="Service" value={booking.service?.name ?? '—'} />
-            <Detail label="Status" value={BOOKING_STATUS_OPTIONS[booking.status] ?? booking.status} />
-            <Detail label="Customer" value={booking.customer?.name ?? formatPhone(booking.customer?.phone)} />
-            <Detail label="Phone" value={formatPhone(booking.customer?.phone)} />
-            <Detail label="Scheduled date" value={formatDate(booking.scheduled_date)} />
-            <Detail label="Scheduled time" value={booking.scheduled_time ?? '—'} />
-            <Detail className="sm:col-span-2" label="Notes" value={booking.notes ?? booking.agent_notes ?? '—'} />
-          </dl>
-        ) : null}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function Detail({ label, value, className }) {
-  return (
-    <div className={className}>
-      <dt className="text-muted-foreground text-xs">{label}</dt>
-      <dd className="mt-0.5 whitespace-pre-wrap">{value}</dd>
-    </div>
+    <RecordDrawer
+      record={booking}
+      title={booking?.reference ?? 'Booking details'}
+      description="Booking schedule, customer and service details."
+      onClose={() => onOpenChange(false)}
+      fields={booking ? [
+        ['Service', booking.service?.name],
+        ['Status', BOOKING_STATUS_OPTIONS[booking.status] ?? booking.status],
+        ['Customer', booking.customer?.name ?? formatPhone(booking.customer?.phone)],
+        ['Phone', formatPhone(booking.customer?.phone)],
+        ['Scheduled date', formatDate(booking.scheduled_date)],
+        ['Scheduled time', booking.scheduled_time],
+        ['Notes', booking.notes ?? booking.agent_notes],
+      ] : []}
+      timeline={booking ? [
+        { label: 'Booking created', value: formatDateTime(booking.created_at) },
+        { label: 'Service scheduled', value: `${formatDate(booking.scheduled_date)} ${booking.scheduled_time?.slice(0, 5) ?? ''}` },
+        { label: `Current status · ${BOOKING_STATUS_OPTIONS[booking.status] ?? booking.status}`, value: formatDateTime(booking.updated_at) },
+      ] : []}
+    />
   );
 }
 
@@ -306,6 +292,10 @@ function AgentBoard() {
     queryKey: ['complaints', 'board'],
     queryFn: () => listComplaints({}),
   });
+
+  const supportsComplaintPriority = (complaints.data ?? []).some((item) =>
+    Object.prototype.hasOwnProperty.call(item, 'priority')
+  );
 
   const move = useMutation({
     mutationFn: ({ id, status }) => updateComplaint(id, { status }),
@@ -333,7 +323,7 @@ function AgentBoard() {
 
   const rows = (complaints.data ?? []).filter((c) => {
     if (category !== 'all' && c.category !== category) return false;
-    if (priority !== 'all' && (c.priority ?? 'normal') !== priority) return false;
+    if (supportsComplaintPriority && priority !== 'all' && (c.priority ?? 'normal') !== priority) return false;
     if (!search) return true;
     const needle = search.toLowerCase();
     return (
@@ -383,18 +373,20 @@ function AgentBoard() {
             <option key={value} value={value}>{humanise(value)}</option>
           ))}
         </select>
-        <select
-          value={priority}
-          onChange={(event) => setPriority(event.target.value)}
-          className="bg-background h-9 rounded-md border px-2 text-sm"
-          aria-label="Filter complaints by priority"
-        >
-          <option value="all">All priorities</option>
-          <option value="urgent">Urgent</option>
-          <option value="high">High</option>
-          <option value="normal">Normal</option>
-          <option value="low">Low</option>
-        </select>
+        {supportsComplaintPriority ? (
+          <select
+            value={priority}
+            onChange={(event) => setPriority(event.target.value)}
+            className="bg-background h-9 rounded-md border px-2 text-sm"
+            aria-label="Filter complaints by priority"
+          >
+            <option value="all">All priorities</option>
+            <option value="urgent">Urgent</option>
+            <option value="high">High</option>
+            <option value="normal">Normal</option>
+            <option value="low">Low</option>
+          </select>
+        ) : null}
       </FilterBar>
 
       <Panel className="min-h-0 flex-1 overflow-hidden">
@@ -428,23 +420,25 @@ function AgentBoard() {
             {complaintStatus(status).label}
           </Button>
         ))}
-        <select
-          defaultValue=""
-          disabled={bulk.isPending}
-          onChange={(event) => {
-            if (!event.target.value) return;
-            bulk.mutate({ ids: selectedIds, patch: { priority: event.target.value } });
-            event.target.value = '';
-          }}
-          className="bg-background h-8 rounded-md border px-2 text-xs"
-          aria-label="Set priority for selected complaints"
-        >
-          <option value="" disabled>Set priority</option>
-          <option value="urgent">Urgent</option>
-          <option value="high">High</option>
-          <option value="normal">Normal</option>
-          <option value="low">Low</option>
-        </select>
+        {supportsComplaintPriority ? (
+          <select
+            defaultValue=""
+            disabled={bulk.isPending}
+            onChange={(event) => {
+              if (!event.target.value) return;
+              bulk.mutate({ ids: selectedIds, patch: { priority: event.target.value } });
+              event.target.value = '';
+            }}
+            className="bg-background h-8 rounded-md border px-2 text-xs"
+            aria-label="Set priority for selected complaints"
+          >
+            <option value="" disabled>Set priority</option>
+            <option value="urgent">Urgent</option>
+            <option value="high">High</option>
+            <option value="normal">Normal</option>
+            <option value="low">Low</option>
+          </select>
+        ) : null}
         <Button
           size="sm"
           variant="outline"
@@ -510,7 +504,11 @@ function AgentBookings() {
     queryFn: () => listBookings({}),
   });
 
-  const technicians = useQuery({ queryKey: ['technicians', 'list'], queryFn: () => listTechnicians() });
+  const technicians = useQuery({
+    queryKey: ['technicians', 'list'],
+    queryFn: () => listTechnicians(),
+    retry: false,
+  });
 
   const single = useMutation({
     mutationFn: ({ id, patch }) => updateBooking(id, patch),
@@ -561,12 +559,20 @@ function AgentBookings() {
   const techName = (id) =>
     (technicians.data ?? []).find((t) => t.id === id)?.name ?? 'Unassigned';
 
+  const supportsTechnicians =
+    !technicians.isError && (bookings.data ?? []).some((item) =>
+      Object.prototype.hasOwnProperty.call(item, 'technician_id')
+    );
+  const supportsBookingPriority = (bookings.data ?? []).some((item) =>
+    Object.prototype.hasOwnProperty.call(item, 'priority')
+  );
+
   const columns = [
     { key: 'reference', header: 'Reference', cell: (booking) => <span className="tabular text-xs">{booking.reference}</span> },
     { key: 'service', header: 'Service', sortValue: (booking) => booking.service?.name, cell: (booking) => booking.service?.name ?? '—' },
     { key: 'customer', header: 'Customer', sortValue: (booking) => booking.customer?.name ?? booking.customer?.phone, cell: (booking) => booking.customer?.name ?? formatPhone(booking.customer?.phone) },
     { key: 'scheduled_date', header: 'Scheduled', cell: (booking) => <span className="text-xs">{formatDate(booking.scheduled_date)}</span> },
-    {
+    ...(supportsTechnicians ? [{
       key: 'technician_id',
       header: 'Technician',
       sortValue: (booking) => techName(booking.technician_id),
@@ -582,7 +588,7 @@ function AgentBookings() {
           {(technicians.data ?? []).map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
         </select>
       ),
-    },
+    }] : []),
     {
       key: 'status',
       header: 'Status',
@@ -598,7 +604,9 @@ function AgentBookings() {
         </select>
       ),
     },
-    { key: 'priority', header: 'Priority', cell: (booking) => <Tag>{booking.priority ?? 'normal'}</Tag> },
+    ...(supportsBookingPriority
+      ? [{ key: 'priority', header: 'Priority', cell: (booking) => <Tag>{booking.priority ?? 'normal'}</Tag> }]
+      : []),
   ];
 
   return (
@@ -609,6 +617,12 @@ function AgentBookings() {
         searchPlaceholder="Search reference, service or phone"
         onReset={() => setSearch('')}
       />
+
+      {technicians.isError ? (
+        <div className="border-info/20 bg-info/5 text-info rounded-xl border px-3 py-2 text-xs">
+          Booking records are available. Technician assignment is hidden because field-operations setup is not installed in the database.
+        </div>
+      ) : null}
 
       <Panel className="min-h-[24rem]">
         <PanelHeader>
@@ -630,22 +644,24 @@ function AgentBookings() {
       </Panel>
 
       <BulkActionBar count={selectedIds.length} onClear={() => setSelectedIds([])}>
-        <select
-          value={bulkTechnician}
-          disabled={bulkAssignment.isPending}
-          onChange={(event) => {
-            const technicianId = event.target.value;
-            setBulkTechnician(technicianId);
-            if (technicianId) bulkAssignment.mutate({ ids: selectedIds, technicianId });
-          }}
-          className="bg-background h-8 max-w-40 rounded-md border px-2 text-xs"
-          aria-label="Assign selected bookings to a technician"
-        >
-          <option value="">Assign technician</option>
-          {(technicians.data ?? []).map((tech) => (
-            <option key={tech.id} value={tech.id}>{tech.name}</option>
-          ))}
-        </select>
+        {supportsTechnicians ? (
+          <select
+            value={bulkTechnician}
+            disabled={bulkAssignment.isPending}
+            onChange={(event) => {
+              const technicianId = event.target.value;
+              setBulkTechnician(technicianId);
+              if (technicianId) bulkAssignment.mutate({ ids: selectedIds, technicianId });
+            }}
+            className="bg-background h-8 max-w-40 rounded-md border px-2 text-xs"
+            aria-label="Assign selected bookings to a technician"
+          >
+            <option value="">Assign technician</option>
+            {(technicians.data ?? []).map((tech) => (
+              <option key={tech.id} value={tech.id}>{tech.name}</option>
+            ))}
+          </select>
+        ) : null}
         {Object.entries(BOOKING_STATUS_OPTIONS).map(([value, label]) => (
           <Button
             key={value}
@@ -657,23 +673,25 @@ function AgentBookings() {
             {label}
           </Button>
         ))}
-        <select
-          defaultValue=""
-          disabled={bulk.isPending}
-          onChange={(event) => {
-            if (!event.target.value) return;
-            bulk.mutate({ ids: selectedIds, patch: { priority: event.target.value } });
-            event.target.value = '';
-          }}
-          className="bg-background h-8 rounded-md border px-2 text-xs"
-          aria-label="Set priority for selected bookings"
-        >
-          <option value="" disabled>Set priority</option>
-          <option value="urgent">Urgent</option>
-          <option value="high">High</option>
-          <option value="normal">Normal</option>
-          <option value="low">Low</option>
-        </select>
+        {supportsBookingPriority ? (
+          <select
+            defaultValue=""
+            disabled={bulk.isPending}
+            onChange={(event) => {
+              if (!event.target.value) return;
+              bulk.mutate({ ids: selectedIds, patch: { priority: event.target.value } });
+              event.target.value = '';
+            }}
+            className="bg-background h-8 rounded-md border px-2 text-xs"
+            aria-label="Set priority for selected bookings"
+          >
+            <option value="" disabled>Set priority</option>
+            <option value="urgent">Urgent</option>
+            <option value="high">High</option>
+            <option value="normal">Normal</option>
+            <option value="low">Low</option>
+          </select>
+        ) : null}
         <Button
           size="sm"
           variant="outline"

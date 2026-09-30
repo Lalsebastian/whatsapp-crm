@@ -1,5 +1,5 @@
 import { fetchRows } from '@/lib/api/client';
-import { buildDailySeries, startOfRange } from '@/lib/analytics-range';
+import { buildDailySeries, rangeDays, startOfRange } from '@/lib/analytics-range';
 
 /*
  * Owner-dashboard metrics.
@@ -21,6 +21,11 @@ function sum(rows, pick) {
   return rows.reduce((total, row) => total + (Number(pick(row)) || 0), 0);
 }
 
+function percentChange(current, previous) {
+  if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) return null;
+  return (current - previous) / Math.abs(previous);
+}
+
 function groupCount(rows, key) {
   const counts = new Map();
   for (const row of rows) {
@@ -34,6 +39,7 @@ function groupCount(rows, key) {
 
 export async function getOverview({ range = '30d' } = {}) {
   const from = startOfRange(range);
+  const days = rangeDays(range);
 
   const [bookings, complaints, surveysResult, eventsResult, techniciansResult] = await Promise.all([
     fetchRows('bookings', { columns: '*, service:services(id, duration_minutes)', order: { column: 'created_at', ascending: false } }),
@@ -58,6 +64,21 @@ export async function getOverview({ range = '30d' } = {}) {
   const completed = scopedBookings.filter((b) => b.status === 'completed');
   const cancelled = scopedBookings.filter((b) => b.status === 'cancelled');
   const revenue = sum(completed, (b) => b.price);
+  const previousTo = from ? new Date(from) : null;
+  const previousFrom = previousTo && days
+    ? new Date(previousTo.getTime() - days * 864e5)
+    : null;
+  const previousBookings = previousFrom
+    ? (bookings ?? []).filter((booking) => {
+        const created = new Date(booking.created_at);
+        return created >= previousFrom && created < previousTo;
+      })
+    : [];
+  const previousCompleted = previousBookings.filter((booking) => booking.status === 'completed');
+  const previousRevenue = sum(previousCompleted, (booking) => booking.price);
+  const previousCompletionRate = previousBookings.length
+    ? previousCompleted.length / previousBookings.length
+    : null;
 
   // Conversion is distinct phones, not event counts: one customer who taps
   // through five screens still counts as one conversion, otherwise the rate is
@@ -91,6 +112,15 @@ export async function getOverview({ range = '30d' } = {}) {
       csatResponses: answered.length,
       csatPending: unanswered.length,
     },
+    comparison: days
+      ? {
+          revenue: percentChange(revenue, previousRevenue),
+          bookings: percentChange(scopedBookings.length, previousBookings.length),
+          completionRate: previousCompletionRate == null
+            ? null
+            : completed.length / Math.max(1, scopedBookings.length) - previousCompletionRate,
+        }
+      : null,
     series: {
       bookingsByStatus: groupCount(scopedBookings, 'status'),
       complaintsByStatus: groupCount(scopedComplaints, 'status'),

@@ -1,6 +1,6 @@
 import { useSearchParams } from 'react-router-dom';
-import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Bot, RefreshCw } from 'lucide-react';
+import { useIsFetching, useQueryClient } from '@tanstack/react-query';
+import { Bot, RefreshCw } from 'lucide-react';
 import { initials } from '@/lib/utils';
 import { ROLE_META, useCurrentUser } from '@/hooks/useCurrentUser';
 import { modulesForRole } from '@/components/layout/navConfig';
@@ -8,8 +8,8 @@ import { MobileNavTrigger } from '@/components/layout/MobileNav';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { listEscalations, queryKeys } from '@/lib/api';
 import { GlobalSearch } from '@/components/layout/GlobalSearch';
+import { NotificationCenter } from '@/components/layout/NotificationCenter';
 
 export function Topbar() {
   const { user, role, roleMeta } = useCurrentUser();
@@ -18,11 +18,6 @@ export function Topbar() {
   const current = modules.find((m) => m.id === searchParams.get('view')) ?? modules[0];
   const queryClient = useQueryClient();
   const fetching = useIsFetching();
-  const escalations = useQuery({
-    queryKey: queryKeys.escalations.list({ status: 'open' }),
-    queryFn: () => listEscalations({ status: 'open' }),
-  });
-  const openEscalations = escalations.data?.length ?? 0;
 
   return (
     <header className="joboy-topbar bg-background/85 supports-[backdrop-filter]:bg-background/65 sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b px-4 backdrop-blur-xl lg:px-6">
@@ -51,12 +46,7 @@ export function Topbar() {
           </Badge>
         )}
 
-        {openEscalations > 0 ? (
-          <Badge variant="warning" title="Open escalations" className="gap-1">
-            <AlertTriangle className="size-3" />
-            {openEscalations}
-          </Badge>
-        ) : null}
+        <NotificationCenter />
 
         <Button
           variant="ghost"

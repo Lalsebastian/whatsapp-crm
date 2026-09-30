@@ -72,7 +72,7 @@ export const queryKeys = {
  */
 
 const BOOKING_COLUMNS =
-  '*, service:services(id, name, category), customer:customers(id, name, phone), technician:technicians(id, name)';
+  '*, service:services(id, name, category), customer:customers(id, name, phone)';
 
 export async function listBookings(filters = {}) {
   const { orderBy = 'scheduled_date', ascending = false, ...where } = filters;

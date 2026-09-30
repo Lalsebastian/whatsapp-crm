@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 export function FilterBar({ children, search, onSearchChange, searchPlaceholder, onReset, className }) {
   return (
     <div className={cn('flex flex-wrap items-center gap-2', className)}>
-      {search ? (
+      {search !== undefined && onSearchChange ? (
         <div className="relative min-w-[12rem] flex-1">
           <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
           <Input

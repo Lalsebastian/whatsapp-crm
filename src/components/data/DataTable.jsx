@@ -116,7 +116,7 @@ export function DataTable({
           horizontal scrolling, which the plan explicitly rules out. */}
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
         <Table className="hidden md:table">
-          <TableHeader>
+          <TableHeader className="bg-card/95 sticky top-0 z-10 backdrop-blur-md">
             <TableRow>
               {selectable ? (
                 <TableHead className="w-10">
@@ -146,6 +146,13 @@ export function DataTable({
                   key={key}
                   data-state={selectedIds.includes(key) ? 'selected' : undefined}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onKeyDown={onRowClick ? (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onRowClick(row);
+                    }
+                  } : undefined}
+                  tabIndex={onRowClick ? 0 : undefined}
                   className={cn('transition-[background-color,transform] duration-150', onRowClick && 'cursor-pointer hover:translate-x-0.5')}
                 >
                   {selectable ? (
@@ -199,9 +206,14 @@ export function DataTable({
                   </div>
                 ))}
 
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                   {columns.slice(2).map((column) => (
-                    <div key={column.key}>{column.cell(row)}</div>
+                    <div key={column.key} className="min-w-0">
+                      <div className="text-muted-foreground mb-0.5 text-[10px] font-semibold tracking-wide uppercase">
+                        {column.header}
+                      </div>
+                      <div className="min-w-0">{column.cell(row)}</div>
+                    </div>
                   ))}
                 </div>
               </li>
@@ -227,7 +239,7 @@ export function DataTable({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className="rounded-md px-2 py-1 disabled:opacity-40"
+              className="hover:bg-muted rounded-md border border-transparent px-2.5 py-1.5 transition-colors disabled:opacity-40"
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={safePage === 0}
             >
@@ -238,7 +250,7 @@ export function DataTable({
             </span>
             <button
               type="button"
-              className="rounded-md px-2 py-1 disabled:opacity-40"
+              className="hover:bg-muted rounded-md border border-transparent px-2.5 py-1.5 transition-colors disabled:opacity-40"
               onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
               disabled={safePage >= pageCount - 1}
             >

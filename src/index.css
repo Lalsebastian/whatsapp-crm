@@ -150,6 +150,16 @@
   50% { translate: 0 -3px; }
 }
 
+@keyframes executive-orbit {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes executive-glow {
+  0%, 100% { opacity: 0.38; scale: 0.96; }
+  50% { opacity: 0.68; scale: 1.04; }
+}
+
 .dark {
   --background: oklch(0.17 0.025 258);
   --foreground: oklch(0.88 0.14 91);
@@ -485,6 +495,186 @@
   .surreal-kpi:nth-child(3n) { animation-delay: -4s; }
   .surreal-kpi:hover { animation-play-state: paused; }
 
+  .executive-hero {
+    isolation: isolate;
+    background:
+      radial-gradient(circle at 85% 10%, color-mix(in oklab, var(--brand-yellow) 23%, transparent), transparent 34%),
+      radial-gradient(circle at 6% 92%, color-mix(in oklab, var(--brand-navy) 13%, transparent), transparent 38%),
+      linear-gradient(128deg, color-mix(in oklab, var(--card) 94%, var(--brand-navy) 6%), color-mix(in oklab, var(--card) 92%, var(--brand-yellow) 8%));
+  }
+
+  .executive-hero::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    inset: 0;
+    background-image: radial-gradient(color-mix(in oklab, var(--brand-navy) 16%, transparent) 0.65px, transparent 0.65px);
+    background-size: 18px 18px;
+    mask-image: linear-gradient(105deg, rgb(0 0 0 / 0.5), transparent 60%);
+    opacity: 0.36;
+  }
+
+  .executive-hero-orbit {
+    position: absolute;
+    z-index: -1;
+    top: -7rem;
+    right: -4rem;
+    width: 25rem;
+    aspect-ratio: 1;
+    border: 1px solid color-mix(in oklab, var(--brand-navy) 12%, transparent);
+    border-radius: 50%;
+    animation: executive-orbit 34s linear infinite;
+  }
+
+  .executive-hero-orbit::before,
+  .executive-hero-orbit::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+  }
+
+  .executive-hero-orbit::before {
+    inset: 18%;
+    border: 1px dashed color-mix(in oklab, var(--brand-yellow) 42%, transparent);
+  }
+
+  .executive-hero-orbit::after {
+    top: 48%;
+    left: -0.35rem;
+    width: 0.7rem;
+    aspect-ratio: 1;
+    background: var(--brand-yellow);
+    box-shadow: 0 0 22px color-mix(in oklab, var(--brand-yellow) 72%, transparent);
+    animation: executive-glow 3.2s ease-in-out infinite;
+  }
+
+  .hero-gradient-text {
+    width: fit-content;
+    background: linear-gradient(100deg, var(--brand-navy) 5%, color-mix(in oklab, var(--brand-navy) 72%, var(--brand-yellow)) 50%, var(--brand-yellow) 115%);
+    background-clip: text;
+    color: transparent;
+  }
+
+  .dark .hero-gradient-text {
+    background-image: linear-gradient(100deg, var(--brand-yellow), color-mix(in oklab, var(--brand-yellow) 66%, white) 52%, var(--brand-yellow));
+  }
+
+  .hero-metric {
+    transition: transform 260ms var(--motion-productive), border-color 260ms ease, background-color 260ms ease;
+  }
+
+  .hero-metric:hover {
+    transform: translateY(-3px);
+    border-color: color-mix(in oklab, var(--brand-yellow) 55%, transparent);
+    background: color-mix(in oklab, var(--background) 78%, var(--brand-yellow) 8%);
+  }
+
+  .executive-priority-card {
+    position: relative;
+  }
+
+  .executive-priority-card::after {
+    content: '';
+    position: absolute;
+    inset: 0.5rem;
+    z-index: -1;
+    border-radius: inherit;
+    background: linear-gradient(145deg, color-mix(in oklab, var(--brand-yellow) 10%, transparent), transparent 45%);
+  }
+
+  .priority-icon {
+    display: inline-flex;
+    width: 2.25rem;
+    aspect-ratio: 1;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.75rem 0.75rem 0.75rem 0.25rem;
+    transition: transform 300ms var(--motion-productive), border-radius 300ms ease;
+  }
+
+  .priority-row:hover .priority-icon {
+    transform: rotate(-6deg) scale(1.08);
+    border-radius: 50%;
+  }
+
+  .priority-icon-warning { background: color-mix(in oklab, var(--warning) 14%, transparent); color: var(--warning); }
+  .priority-icon-info { background: color-mix(in oklab, var(--info) 12%, transparent); color: var(--info); }
+  .priority-icon-primary { background: color-mix(in oklab, var(--primary) 15%, transparent); color: var(--primary); }
+  .priority-icon-success { background: color-mix(in oklab, var(--success) 13%, transparent); color: var(--success); }
+
+  .dashboard-section-heading {
+    position: relative;
+  }
+
+  .dashboard-section-heading::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: -0.65rem;
+    left: 0;
+    height: 1px;
+    background: linear-gradient(90deg, color-mix(in oklab, var(--brand-yellow) 70%, transparent), color-mix(in oklab, var(--brand-navy) 12%, transparent), transparent 82%);
+  }
+
+  .record-drawer-hero,
+  .notification-hero {
+    background:
+      radial-gradient(circle at 90% 0%, color-mix(in oklab, var(--brand-yellow) 24%, transparent), transparent 45%),
+      linear-gradient(135deg, color-mix(in oklab, var(--card) 92%, var(--brand-navy) 8%), var(--card));
+  }
+
+  .record-drawer-orbit {
+    position: absolute;
+    top: -5rem;
+    right: -3rem;
+    width: 12rem;
+    aspect-ratio: 1;
+    border: 1px solid color-mix(in oklab, var(--brand-navy) 16%, transparent);
+    border-radius: 50%;
+    animation: executive-orbit 24s linear infinite;
+  }
+
+  .record-drawer-orbit::before,
+  .record-drawer-orbit::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+  }
+
+  .record-drawer-orbit::before {
+    inset: 20%;
+    border: 1px dashed color-mix(in oklab, var(--brand-yellow) 60%, transparent);
+  }
+
+  .record-drawer-orbit::after {
+    top: 48%;
+    left: -0.3rem;
+    width: 0.6rem;
+    aspect-ratio: 1;
+    background: var(--brand-yellow);
+    box-shadow: 0 0 16px color-mix(in oklab, var(--brand-yellow) 65%, transparent);
+  }
+
+  .notification-icon {
+    display: grid;
+    width: 2.25rem;
+    aspect-ratio: 1;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 0.75rem 0.75rem 0.75rem 0.25rem;
+    transition: transform 260ms var(--motion-productive), border-radius 260ms ease;
+  }
+
+  button:hover > .notification-icon {
+    transform: rotate(-5deg) scale(1.06);
+    border-radius: 50%;
+  }
+
+  .notification-icon-warning { background: color-mix(in oklab, var(--warning) 14%, transparent); color: var(--warning); }
+  .notification-icon-destructive { background: color-mix(in oklab, var(--destructive) 12%, transparent); color: var(--destructive); }
+  .notification-icon-info { background: color-mix(in oklab, var(--info) 12%, transparent); color: var(--info); }
+
   .dream-header {
     position: relative;
     isolation: isolate;
@@ -708,6 +898,9 @@
   .surreal-particles,
   .surreal-portal,
   .surreal-kpi,
+  .executive-hero-orbit,
+  .executive-hero-orbit::after,
+  .record-drawer-orbit,
   .dream-header::before,
   .surreal-icon,
   [data-slot='skeleton'],
