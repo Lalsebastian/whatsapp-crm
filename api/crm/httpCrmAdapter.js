@@ -35,10 +35,15 @@ async function getAvailability() { return notImplemented('getAvailability'); }
 async function createBooking() { return notImplemented('createBooking'); }
 async function getBookings() { return notImplemented('getBookings'); }
 async function getBookingStatus() { return notImplemented('getBookingStatus'); }
+async function getBookingById() { return notImplemented('getBookingById'); }
 async function rescheduleBooking() { return notImplemented('rescheduleBooking'); }
 async function cancelBooking() { return notImplemented('cancelBooking'); }
 async function createComplaint() { return notImplemented('createComplaint'); }
 async function getComplaintStatus() { return notImplemented('getComplaintStatus'); }
+async function getOpenComplaintForBooking() { return notImplemented('getOpenComplaintForBooking'); }
+async function createFeedback() { return notImplemented('createFeedback'); }
+async function getFeedbackForBooking() { return notImplemented('getFeedbackForBooking'); }
+async function markFeedbackFollowUp() { return notImplemented('markFeedbackFollowUp'); }
 async function escalateToHuman() { return notImplemented('escalateToHuman'); }
 
 module.exports = {
@@ -51,9 +56,14 @@ module.exports = {
   createBooking,
   getBookings,
   getBookingStatus,
+  getBookingById,
   rescheduleBooking,
   cancelBooking,
   createComplaint,
   getComplaintStatus,
+  getOpenComplaintForBooking,
+  createFeedback,
+  getFeedbackForBooking,
+  markFeedbackFollowUp,
   escalateToHuman,
 };

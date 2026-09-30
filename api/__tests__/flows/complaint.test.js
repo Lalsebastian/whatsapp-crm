@@ -151,7 +151,7 @@ describe('complaint flow', () => {
     );
   });
 
-  it('mentions priority review only when escalation succeeds', async () => {
+  it('confirms the complaint handoff only when escalation succeeds', async () => {
     fakeCrm.createComplaint.mockResolvedValue({ reference: 'CM-PRIORITY', id: 'c2' });
     escalationService.evaluateTriggers.mockReturnValue({ escalate: true, reason: 'property_damage' });
     escalationService.triggerEscalation.mockResolvedValue();
@@ -161,8 +161,13 @@ describe('complaint flow', () => {
 
     expect(whatsapp.sendText).toHaveBeenCalledWith(
       '971500',
-      expect.stringContaining("I've also marked this for priority review")
+      expect.stringContaining("You won't need to repeat everything when they take over")
     );
+    expect(escalationService.triggerEscalation).toHaveBeenCalledWith(expect.objectContaining({
+      complaint: expect.objectContaining({ reference: 'CM-PRIORITY', category: 'property_damage' }),
+      reason: 'property_damage',
+    }));
+    expect(sessionStore.clearFlow).not.toHaveBeenCalled();
   });
 
   it('still confirms registration but does not claim priority review when escalation fails', async () => {
@@ -175,7 +180,8 @@ describe('complaint flow', () => {
 
     const message = whatsapp.sendText.mock.calls.at(-1)[1];
     expect(message).toContain("I've registered your complaint with our support team");
-    expect(message).not.toContain('priority review');
+    expect(message).not.toContain("You won't need to repeat everything");
+    expect(sessionStore.clearFlow).toHaveBeenCalledWith('971500');
   });
 
   it('does not claim submission succeeded when complaint creation fails', async () => {

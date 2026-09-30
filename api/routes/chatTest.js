@@ -10,6 +10,10 @@ const { handleInboundMessage } = require('../router/conversationRouter');
 const testChannel = require('../whatsapp/testChannel');
 const sessionStore = require('../session/sessionStore');
 const unknownStreak = require('../router/unknownStreak');
+const feedback = require('../flows/feedback');
+const { getCrmAdapter } = require('../crm');
+
+const crm = getCrmAdapter();
 
 const router = express.Router();
 
@@ -62,6 +66,65 @@ router.post('/reset', requireTestChatAccess, async (req, res) => {
   }
 });
 
+function responsePayload(result, messages) {
+  return {
+    reply: messages.map((m) => m.body).join('\n---\n') || null,
+    options: messages.flatMap((m) => m.options || []).map((o) => ({ id: o.id, title: o.title })),
+    intent: result.intent || null,
+    confidence: result.confidence ?? null,
+    aiMatch: result.aiMatch || null,
+    service: result.service || null,
+    matchSource: result.matchSource || null,
+    serviceConfidence: result.serviceConfidence ?? null,
+    changedField: result.changedField || null,
+    previousValue: result.previousValue ?? null,
+    newValue: result.newValue ?? null,
+    flow: result.flow || null,
+    step: result.step || null,
+    rating: result.rating ?? null,
+    followUpRequired: !!result.followUpRequired,
+    complaintLinked: !!result.complaintLinked,
+    humanTakeover: !!result.humanTakeover,
+    handoff: !!result.handoff,
+    priority: result.priority || null,
+    handoffReason: result.handoffReason || null,
+    debugReason: result.debugReason || null,
+  };
+}
+
+router.post('/start-feedback', requireTestChatAccess, async (req, res) => {
+  const phone = String((req.body && req.body.phone) || '').trim();
+  const bookingId = String((req.body && req.body.bookingId) || '').trim();
+  if (!phone || !bookingId) return res.status(400).json({ error: 'Request body must include "phone" and "bookingId".' });
+
+  try {
+    const session = await sessionStore.getOrCreateSession(phone);
+    const customer = await crm.findCustomerByPhone(phone);
+    const { result, messages } = await testChannel.withCapture(async () => {
+      const outcome = await feedback.startFeedbackForBooking({
+        session,
+        customer,
+        bookingId,
+        allowUnverifiedCompletion: true,
+      });
+      const freshSession = await sessionStore.getOrCreateSession(phone);
+      return {
+        ...outcome,
+        intent: 'FEEDBACK',
+        flow: freshSession.currentFlow,
+        step: freshSession.currentStep,
+        rating: freshSession.context && freshSession.context.rating,
+        followUpRequired: freshSession.context && freshSession.context.followUpRequired,
+        complaintLinked: freshSession.context && freshSession.context.complaintLinked,
+      };
+    });
+    return res.json(responsePayload(result, messages));
+  } catch (err) {
+    logger.error('CHAT_TEST', 'startFeedbackForBooking failed:', err.message);
+    return res.status(500).json({ error: 'Unable to start the feedback test flow.', detail: err.message });
+  }
+});
+
 router.post('/', requireTestChatAccess, async (req, res) => {
   const { phone, message, buttonId, voiceTranscript, voiceLanguage } = req.body || {};
   if (!phone || (!message && !buttonId && !voiceTranscript)) {
@@ -95,20 +158,7 @@ router.post('/', requireTestChatAccess, async (req, res) => {
 
     const { result, messages } = await testChannel.withCapture(() => handleInboundMessage(inbound));
 
-    res.json({
-      reply: messages.map((m) => m.body).join('\n---\n') || null,
-      options: messages.flatMap((m) => m.options || []).map((o) => ({ id: o.id, title: o.title })),
-      intent: result.intent || null,
-      confidence: result.confidence ?? null,
-      aiMatch: result.aiMatch || null,
-      service: result.service || null,
-      matchSource: result.matchSource || null,
-      serviceConfidence: result.serviceConfidence ?? null,
-      flow: result.flow || null,
-      step: result.step || null,
-      humanTakeover: !!result.humanTakeover,
-      debugReason: result.debugReason || null,
-    });
+    res.json(responsePayload(result, messages));
   } catch (err) {
     // err.response is present for failed axios calls (e.g. Supabase/PostgREST) —
     // surface its real body here so this dev-only endpoint doesn't require

@@ -38,6 +38,10 @@ const env = {
   // production, so enabling the flag without a secret fails closed.
   ENABLE_TEST_CHAT: booleanValue(process.env.ENABLE_TEST_CHAT),
   TEST_CHAT_SECRET: process.env.TEST_CHAT_SECRET || '',
+
+  REVIEWS_ENABLED: booleanValue(process.env.REVIEWS_ENABLED),
+  PUBLIC_REVIEW_URL: process.env.PUBLIC_REVIEW_URL || '',
+  REVIEW_MIN_RATING: Math.min(5, Math.max(1, Number(process.env.REVIEW_MIN_RATING) || 4)),
 };
 
 module.exports = env;

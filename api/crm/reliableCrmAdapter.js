@@ -11,7 +11,10 @@ const READ_METHODS = new Set([
   'getAvailability',
   'getBookings',
   'getBookingStatus',
+  'getBookingById',
   'getComplaintStatus',
+  'getOpenComplaintForBooking',
+  'getFeedbackForBooking',
 ]);
 
 const WRITE_METHODS = new Set([
@@ -21,6 +24,8 @@ const WRITE_METHODS = new Set([
   'cancelBooking',
   'createComplaint',
   'escalateToHuman',
+  'createFeedback',
+  'markFeedbackFollowUp',
 ]);
 
 function wrapCrmAdapter(adapter, options = {}) {

@@ -35,6 +35,9 @@ mediaHandler.downloadWhatsAppMedia = vi.fn();
 const transcription = require('../../media/transcription');
 transcription.transcribeAudio = vi.fn();
 
+const escalationService = require('../../escalation/escalationService');
+escalationService.triggerEscalation = vi.fn();
+
 const { handleInboundMessage } = require('../../router/conversationRouter');
 
 describe('human takeover', () => {
@@ -42,6 +45,7 @@ describe('human takeover', () => {
     [sessionStore.getOrCreateSession, sessionStore.updateSession, sessionStore.clearFlow, sessionStore.setFlow, sessionStore.setHumanTakeover,
       whatsapp.sendText, whatsapp.sendButtons, whatsapp.sendListMessage, db.insert, db.get, db.upsert, db.patch]
       .forEach((fn) => fn.mockReset());
+    escalationService.triggerEscalation.mockReset();
   });
 
   it('suppresses all outbound replies once human_takeover is true, but still logs the inbound message', async () => {
@@ -83,5 +87,46 @@ describe('human takeover', () => {
     expect(result.reply).toBe('active_flow_greeting');
     expect(whatsapp.sendText).toHaveBeenCalledWith('971500', expect.stringContaining('continue from where we left off'));
     expect(whatsapp.sendListMessage).not.toHaveBeenCalled();
+  });
+
+  it('provides safety guidance and creates an urgent handoff during an active flow', async () => {
+    const activeSession = {
+      phone: '971500', currentFlow: 'booking', currentStep: 'select_slot',
+      context: { serviceName: 'Electrical', propertyLabel: 'Home' },
+      preferredLanguage: 'en', humanTakeover: false, customerId: 'cust1',
+    };
+    sessionStore.getOrCreateSession.mockResolvedValue(activeSession);
+    escalationService.triggerEscalation.mockResolvedValue({ priority: 'URGENT', reason: 'electrical_safety_concern' });
+
+    const result = await handleInboundMessage({
+      from: '971500', type: 'text', text: 'There is smoke and a burning smell from the socket', waMessageId: 'wamid-safety',
+    });
+
+    expect(escalationService.triggerEscalation).toHaveBeenCalledWith(expect.objectContaining({
+      session: activeSession,
+      reason: 'electrical_safety_concern',
+      originalCustomerMessage: 'There is smoke and a burning smell from the socket',
+    }));
+    expect(whatsapp.sendText.mock.calls[0][1]).toContain('avoid using');
+    expect(whatsapp.sendText.mock.calls.at(-1)[1]).toContain("I've shared the details");
+    expect(result).toMatchObject({ handoff: true, priority: 'URGENT', handoffReason: 'electrical_safety_concern' });
+    expect(sessionStore.clearFlow).not.toHaveBeenCalled();
+  });
+
+  it('does not claim or enable a handoff when escalation fails', async () => {
+    const activeSession = {
+      phone: '971500', currentFlow: 'booking', currentStep: 'select_date',
+      context: { serviceName: 'Plumbing' }, humanTakeover: false, customerId: 'cust1',
+    };
+    sessionStore.getOrCreateSession.mockResolvedValue(activeSession);
+    escalationService.triggerEscalation.mockRejectedValue(new Error('CRM unavailable'));
+
+    const result = await handleInboundMessage({
+      from: '971500', type: 'text', text: 'There is flooding near the socket', waMessageId: 'wamid-safety-failed',
+    });
+
+    expect(result).toMatchObject({ handoff: false, priority: null, reply: 'escalation_failed' });
+    expect(whatsapp.sendText.mock.calls.at(-1)[1]).toContain("wasn't able to connect");
+    expect(sessionStore.clearFlow).not.toHaveBeenCalled();
   });
 });

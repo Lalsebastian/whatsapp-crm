@@ -9,6 +9,7 @@ const complaint = require('../flows/complaint');
 const complaintStatus = require('../flows/complaintStatus');
 const serviceInfo = require('../flows/serviceInfo');
 const support = require('../flows/support');
+const feedback = require('../flows/feedback');
 
 // Entry points reachable from a main-menu tap or a mapped AI intent.
 const entryPoints = {
@@ -22,6 +23,7 @@ const entryPoints = {
   HUMAN_SUPPORT: support.startSupport,
   // Backward-compatible alias for previously delivered list-message replies.
   TALK_TO_SUPPORT: support.startSupport,
+  GIVE_FEEDBACK: feedback.startFeedback,
 };
 
 // AI intent -> entry point key. NEW_BOOKING/COMPLAINT etc. all resolve to the
@@ -36,6 +38,7 @@ const intentToEntryPoint = {
   COMPLAINT_STATUS: 'COMPLAINT_STATUS',
   GENERAL_QUERY: 'SERVICE_INFO',
   HUMAN_AGENT: 'TALK_TO_SUPPORT',
+  FEEDBACK: 'GIVE_FEEDBACK',
 };
 
 // flow name (as stored in sessions.current_flow) -> { step: handler }
@@ -44,6 +47,7 @@ const stepHandlers = {
   my_bookings: myBookings.steps,
   complaint: complaint.steps,
   complaint_status: complaintStatus.steps,
+  feedback: feedback.steps,
 };
 
 module.exports = { entryPoints, intentToEntryPoint, stepHandlers };

@@ -20,6 +20,8 @@
   input[type=password] { width: 100%; box-sizing: border-box; margin-bottom: 0.5rem; padding: 0.5rem; border-radius: 6px; border: 1px solid #444; background: #16181d; color: #eee; }
   button[type=submit] { padding: 0.5rem 1rem; border-radius: 6px; border: none; background: #2563eb; color: white; cursor: pointer; }
   #reset-session { margin: 0 0 0.8rem; padding: 0.45rem 0.8rem; border-radius: 6px; border: 1px solid #dc2626; background: transparent; color: #fca5a5; cursor: pointer; }
+  #feedback-tools { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; }
+  #start-feedback { padding: 0.45rem 0.8rem; border-radius: 6px; border: 1px solid #2563eb; background: transparent; color: #8ab4f8; cursor: pointer; }
   button[type=submit]:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
   label { font-size: 0.8rem; opacity: 0.7; }
   .hint { font-size: 0.78rem; opacity: 0.55; margin: 0.4rem 0 1rem; }
@@ -37,6 +39,10 @@
 <input id="phone" type="text" value="971500000000" style="width:100%;margin-bottom:0.5rem;padding:0.5rem;border-radius:6px;border:1px solid #444;background:#16181d;color:#eee;" />
 <p class="hint">Type free text (e.g. "hi", "Nale AC service venam") or tap the buttons the bot sends — both drive the same conversation.</p>
 <button id="reset-session" type="button" hidden>Reset Test Session</button>
+<div id="feedback-tools" hidden>
+  <input id="feedback-booking-id" type="text" placeholder="Completed booking ID" />
+  <button id="start-feedback" type="button">Start Feedback</button>
+</div>
 <div id="log"></div>
 <form id="form">
   <input id="message" type="text" placeholder="Type a message…" autocomplete="off" />
@@ -52,6 +58,9 @@ const secretInput = document.getElementById('secret');
 const statusEl = document.getElementById('status');
 const submitButton = form.querySelector('button[type=submit]');
 const resetButton = document.getElementById('reset-session');
+const feedbackTools = document.getElementById('feedback-tools');
+const feedbackBookingInput = document.getElementById('feedback-booking-id');
+const startFeedbackButton = document.getElementById('start-feedback');
 
 function setAvailability(enabled, message) {
   statusEl.textContent = message;
@@ -59,6 +68,7 @@ function setAvailability(enabled, message) {
   messageInput.disabled = !enabled;
   submitButton.disabled = !enabled;
   resetButton.hidden = !enabled;
+  feedbackTools.hidden = !enabled;
 }
 
 async function checkAvailability() {
@@ -150,6 +160,15 @@ async function sendMessage({ message, buttonId, label }) {
     if (data.service) meta += '\nservice=' + data.service;
     if (data.matchSource) meta += '\nmatch=' + data.matchSource;
     if (data.serviceConfidence !== null) meta += '\nserviceConfidence=' + data.serviceConfidence;
+    if (data.changedField) meta += '\nchangedField=' + JSON.stringify(data.changedField);
+    if (data.previousValue !== null) meta += '\npreviousValue=' + JSON.stringify(data.previousValue);
+    if (data.newValue !== null) meta += '\nnewValue=' + JSON.stringify(data.newValue);
+    if (data.handoff) meta += '\nhandoff=true';
+    if (data.priority) meta += '\npriority=' + data.priority;
+    if (data.handoffReason) meta += '\nreason=' + data.handoffReason;
+    if (data.rating !== null) meta += '\nrating=' + data.rating;
+    meta += '\nfollowUpRequired=' + data.followUpRequired;
+    meta += '\ncomplaintLinked=' + data.complaintLinked;
     if (data.debugReason) meta += '\nwhy UNKNOWN: ' + data.debugReason;
     addMessage(
       'bot',
@@ -195,6 +214,35 @@ resetButton.addEventListener('click', async () => {
     addMessage('bot', data.message || 'Test session reset.');
   } catch (err) {
     addMessage('bot', 'Reset failed: ' + err.message);
+  }
+});
+
+startFeedbackButton.addEventListener('click', async () => {
+  const phone = phoneInput.value.trim();
+  const bookingId = feedbackBookingInput.value.trim();
+  const secret = secretInput.value;
+  if (!phone || !bookingId || !secret) {
+    addMessage('bot', 'Enter the phone identity, developer secret, and booking ID first.');
+    return;
+  }
+  addMessage('user', 'Start feedback for booking ' + bookingId);
+  try {
+    const res = await fetch('/api/chat/test/start-feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-test-chat-secret': secret },
+      body: JSON.stringify({ phone, bookingId }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      addMessage('bot', data.error || 'Unable to start feedback.');
+      return;
+    }
+    const meta = 'intent=' + data.intent + ' flow=' + data.flow + ' step=' + data.step
+      + '\nrating=' + data.rating + '\nfollowUpRequired=' + data.followUpRequired
+      + '\ncomplaintLinked=' + data.complaintLinked;
+    addMessage('bot', data.reply || '(no reply)', meta, data.options);
+  } catch (err) {
+    addMessage('bot', 'Request failed: ' + err.message);
   }
 });
 

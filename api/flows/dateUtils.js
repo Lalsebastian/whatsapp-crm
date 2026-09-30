@@ -26,6 +26,15 @@ function parseDateInput(text) {
     return formatDate(d);
   }
 
+  const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const requestedWeekday = weekdays.findIndex((weekday) => t === weekday || t === `next ${weekday}`);
+  if (requestedWeekday >= 0) {
+    const daysAhead = (requestedWeekday - today.getDay() + 7) % 7 || 7;
+    const d = new Date(today);
+    d.setDate(d.getDate() + daysAhead);
+    return formatDate(d);
+  }
+
   let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (m) {
     const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];

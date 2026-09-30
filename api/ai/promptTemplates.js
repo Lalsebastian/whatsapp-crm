@@ -8,6 +8,7 @@ const INTENTS = [
   'COMPLAINT_STATUS',
   'GENERAL_QUERY',
   'HUMAN_AGENT',
+  'FEEDBACK',
   'UNKNOWN',
 ];
 
@@ -45,6 +46,7 @@ Rules:
 - Extract a short issue description and location hint only when the customer explicitly provides them.
 - Greetings, small talk, or anything unrelated to booking/complaints should be GENERAL_QUERY.
 - Any explicit request for a human, agent, or representative is HUMAN_AGENT.
+- A request to rate, review, or give feedback about a completed service is FEEDBACK.
 - If you are not reasonably confident what the customer wants, return "UNKNOWN" with a low confidence score instead of guessing.
 
 Conversation context: currentFlow=${context.currentFlow || 'none'}, preferredLanguage=${context.preferredLanguage || 'unknown'}
@@ -101,6 +103,50 @@ CRM services: ${JSON.stringify(catalog)}
 Customer request: """${message}"""`;
 }
 
+function buildBookingCorrectionPrompt(message, context = {}) {
+  return `Extract changes the customer wants to make to a home-services booking that is currently being reviewed. You only interpret the request; you never update or create a booking.
+
+Return ONLY one JSON object with exactly this shape:
+{
+  "service": string or null,
+  "locationHint": string or null,
+  "preferredDate": string or null,
+  "preferredTime": string or null,
+  "confidence": number between 0 and 1
+}
+
+Rules:
+- Include only fields the customer explicitly wants to change. Leave every unchanged field null.
+- Understand corrections such as "actually make it tomorrow", "use my office address", "make it plumbing instead", and "evening is better".
+- A single message may change several fields, such as "change it to plumbing tomorrow morning".
+- For a relative date or weekday, preserve the customer's wording (for example "tomorrow" or "Friday").
+- Never invent a service, address, date, or time.
+- Understand English, Malayalam, Manglish, Hindi, Hinglish, and mixed-language requests.
+
+Current booking: ${JSON.stringify(context.booking || {})}
+Preferred language: ${context.preferredLanguage || 'unknown'}
+Customer correction: """${message}"""`;
+}
+
+function buildHandoffSummaryPrompt(handoff) {
+  return `Write a short internal support summary for a home-services case.
+
+Return ONLY one JSON object with exactly this shape:
+{
+  "summary": string
+}
+
+Rules:
+- Use only facts present in the supplied handoff data.
+- Keep the summary concise: no more than three short sentences.
+- Preserve the practical issue, relevant booking or complaint context, supplied media, and what the customer is asking for.
+- Do not speculate about emotions, fault, technician arrival times, outcomes, or promises.
+- Do not invent missing details.
+- This is internal staff context, not customer-facing wording.
+
+Handoff data: ${JSON.stringify(handoff)}`;
+}
+
 module.exports = {
   INTENTS,
   LANGUAGES,
@@ -108,4 +154,6 @@ module.exports = {
   buildIntentPrompt,
   buildComplaintCategoryPrompt,
   buildServiceMatchPrompt,
+  buildBookingCorrectionPrompt,
+  buildHandoffSummaryPrompt,
 };

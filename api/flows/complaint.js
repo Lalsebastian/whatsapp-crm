@@ -27,6 +27,7 @@ function withVoiceEvidence(context, input) {
       mediaId: input.voice.mediaId,
       transcript: input.voice.transcript,
       detectedLanguage: input.voice.detectedLanguage,
+      confidence: input.voice.confidence,
       mimeType: input.voice.mimeType,
     });
   }
@@ -132,6 +133,17 @@ async function continueWithComplaintContext(session, context) {
   await promptMedia(session, context);
 }
 
+async function startComplaintFromFeedback(session, customer, input) {
+  const context = {
+    bookingId: input.bookingId,
+    category: CATEGORY_BY_ID[input.category] ? input.category : 'other',
+    description: input.description || undefined,
+    attachments: input.attachments || [],
+    feedbackId: input.feedbackId,
+  };
+  return continueWithComplaintContext(session, context);
+}
+
 async function promptCategory(session, context) {
   await whatsapp.sendListMessage(session.phone, "I'll help you get this resolved. Please select the category that best describes the issue, or describe what happened in your own words.", 'Choose category', [
     { title: 'Complaint Category', rows: CATEGORIES.map((c) => ({ id: `CAT_${c.id}`, title: c.title })) },
@@ -210,7 +222,7 @@ async function handleAwaitingMedia(session, customer, input) {
     return;
   }
 
-  const { category, description, bookingId, attachments = [], voiceNotes = [] } = session.context;
+  const { category, description, bookingId, attachments = [], voiceNotes = [], feedbackId } = session.context;
   const categoryLabel = CATEGORY_BY_ID[category]?.summaryLabel || 'Other issue';
   const summary = `Issue: ${categoryLabel}\nDetails: ${description || 'No additional details provided'}\nAttachments received: ${attachments.length}`;
   await whatsapp.sendButtons(session.phone, `Thank you. I've noted the details below. Please review them before I submit the complaint to our support team.\n\n${summary}`, [
@@ -223,6 +235,7 @@ async function handleAwaitingMedia(session, customer, input) {
     bookingId,
     attachments,
     voiceNotes,
+    feedbackId,
     submissionNonce: randomUUID(),
   });
 }
@@ -238,7 +251,7 @@ async function handleConfirm(session, customer, input) {
     return;
   }
 
-  const { category, description, bookingId, attachments = [], voiceNotes = [] } = session.context;
+  const { category, description, bookingId, attachments = [], voiceNotes = [], feedbackId } = session.context;
   if (!category) {
     logger.error('COMPLAINT', 'Missing category at confirm step', session.context);
     await whatsapp.sendText(session.phone, 'I\'m sorry, some complaint details are missing, so I could not submit the request. Please type "menu" to start again.');
@@ -287,7 +300,22 @@ async function handleConfirm(session, customer, input) {
       });
     }
     logger.log('COMPLAINT_CREATED', { phone: session.phone, reference: complaint.reference });
-    await sessionStore.clearFlow(session.phone);
+
+    if (feedbackId && complaint.id) {
+      try {
+        await crm.markFeedbackFollowUp(feedbackId, { complaintId: complaint.id });
+        logger.audit('FEEDBACK_COMPLAINT_LINKED', {
+          phone: session.phone,
+          customerId: customer.id,
+          bookingId,
+          feedbackId,
+          complaintReference: complaint.reference,
+          result: 'success',
+        });
+      } catch (linkError) {
+        logger.error('COMPLAINT', 'Feedback was saved but could not be linked to the complaint:', linkError.message);
+      }
+    }
   } catch (err) {
     logger.error('COMPLAINT', 'createComplaint failed:', err.message);
     logger.audit(err.duplicateBlocked ? 'COMPLAINT_DUPLICATE_BLOCKED' : 'COMPLAINT_CREATE_FAILED', {
@@ -305,8 +333,12 @@ async function handleConfirm(session, customer, input) {
             crm,
             phone: session.phone,
             customerId: customer.id,
+            customer,
+            session,
             reason: 'complaint_creation_uncertain',
             summary: 'A complaint creation request timed out. Please verify the CRM before resubmitting.',
+            originalCustomerMessage: description,
+            suggestedNextAction: 'Verify whether the complaint was created before attempting another submission.',
           });
           escalated = true;
         } catch (escalationError) {
@@ -324,6 +356,7 @@ async function handleConfirm(session, customer, input) {
   }
 
   if (duplicateSubmission) {
+    await sessionStore.clearFlow(session.phone);
     await whatsapp.sendText(
       session.phone,
       `Your complaint has already been registered. Reference: *${complaint.reference}*`
@@ -332,15 +365,27 @@ async function handleConfirm(session, customer, input) {
   }
 
   let priorityReview = false;
-  const trigger = evaluateTriggers({ category });
+  const trigger = evaluateTriggers({ category, text: description || '' });
   if (trigger.escalate) {
     try {
       await triggerEscalation({
         crm,
         phone: session.phone,
         customerId: customer.id,
+        customer,
+        session,
         reason: trigger.reason,
         summary: `Complaint ${complaint.reference}: ${category}${description ? ` — ${description}` : ''}${voiceNotes.length ? ` Voice notes: ${voiceNotes.map((note) => `${note.mediaId} (${note.detectedLanguage || 'language unknown'})`).join(', ')}` : ''}`,
+        originalCustomerMessage: description,
+        complaint: {
+          id: complaint.id,
+          reference: complaint.reference,
+          relatedBookingId: bookingId,
+          category,
+          description,
+          status: complaint.status || 'open',
+        },
+        suggestedNextAction: 'Review the complaint and continue directly with the customer.',
       });
       priorityReview = true;
     } catch (err) {
@@ -348,7 +393,10 @@ async function handleConfirm(session, customer, input) {
     }
   }
 
-  const priorityLine = priorityReview ? "\n\nI've also marked this for priority review." : '';
+  if (!priorityReview) await sessionStore.clearFlow(session.phone);
+  const priorityLine = priorityReview
+    ? "\n\nI've also shared your complaint and the details you've provided with our support team. You won't need to repeat everything when they take over."
+    : '';
   await whatsapp.sendText(
     session.phone,
     `Thank you. I've registered your complaint with our support team.\n\nReference: *${complaint.reference}*\n\nOur team will review the issue and follow up with you shortly. You can also check the complaint status at any time from the main menu.${priorityLine}`
@@ -357,6 +405,7 @@ async function handleConfirm(session, customer, input) {
 
 module.exports = {
   startComplaint,
+  startComplaintFromFeedback,
   steps: {
     select_booking: handleSelectBooking,
     select_category: handleSelectCategory,

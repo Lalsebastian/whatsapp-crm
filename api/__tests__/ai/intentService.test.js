@@ -9,7 +9,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const geminiProvider = require('../../ai/providers/geminiProvider');
 geminiProvider.callGemini = vi.fn();
 
-const { detectIntent, classifyComplaintCategory, matchServiceToCatalog } = require('../../ai/intentService');
+const {
+  detectIntent,
+  classifyComplaintCategory,
+  matchServiceToCatalog,
+  analyzeBookingCorrection,
+  summarizeHandoff,
+} = require('../../ai/intentService');
 const { callGemini } = geminiProvider;
 
 describe('detectIntent', () => {
@@ -66,6 +72,12 @@ describe('detectIntent', () => {
     const result = await detectIntent('let me talk to someone');
     expect(result.intent).toBe('HUMAN_AGENT');
   });
+
+  it('accepts the dedicated feedback intent', async () => {
+    callGemini.mockResolvedValueOnce(JSON.stringify({ intent: 'FEEDBACK', confidence: 0.93 }));
+    const result = await detectIntent('I want to review my booking');
+    expect(result.intent).toBe('FEEDBACK');
+  });
 });
 
 describe('matchServiceToCatalog', () => {
@@ -108,5 +120,44 @@ describe('classifyComplaintCategory', () => {
     const result = await classifyComplaintCategory('The technician was rude');
 
     expect(result).toEqual({ category: null, confidence: 0 });
+  });
+});
+
+describe('analyzeBookingCorrection', () => {
+  beforeEach(() => { callGemini.mockReset(); });
+
+  it('extracts multiple changed fields without inventing unchanged details', async () => {
+    callGemini.mockResolvedValueOnce(JSON.stringify({
+      service: 'Plumbing', locationHint: null, preferredDate: 'tomorrow', preferredTime: 'morning', confidence: 0.97,
+    }));
+
+    await expect(analyzeBookingCorrection('change it to plumbing tomorrow morning')).resolves.toEqual({
+      service: 'Plumbing', locationHint: null, preferredDate: 'tomorrow', preferredTime: 'morning', confidence: 0.97,
+    });
+  });
+
+  it('falls back safely when correction analysis is unavailable', async () => {
+    callGemini.mockRejectedValueOnce(new Error('network error'));
+    await expect(analyzeBookingCorrection('make it plumbing instead')).resolves.toEqual({
+      service: null, locationHint: null, preferredDate: null, preferredTime: null, confidence: 0,
+    });
+  });
+});
+
+describe('summarizeHandoff', () => {
+  beforeEach(() => { callGemini.mockReset(); });
+
+  it('returns a concise AI-generated staff summary', async () => {
+    callGemini.mockResolvedValueOnce(JSON.stringify({
+      summary: 'Customer reports repeat AC cooling failure and supplied one image.',
+    }));
+    await expect(summarizeHandoff({ complaint: { category: 'problem_returned' } })).resolves.toBe(
+      'Customer reports repeat AC cooling failure and supplied one image.'
+    );
+  });
+
+  it('returns null so the handoff service can use its deterministic fallback', async () => {
+    callGemini.mockRejectedValueOnce(new Error('AI unavailable'));
+    await expect(summarizeHandoff({ issue: { reasonForEscalation: 'payment_dispute' } })).resolves.toBeNull();
   });
 });

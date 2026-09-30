@@ -26,4 +26,13 @@ describe('customer-facing date and slot formatting', () => {
     expected.setDate(expected.getDate() + 2);
     expect(parseDateInput('day after tomorrow')).toBe(expected.toISOString().slice(0, 10));
   });
+
+  it('understands the next named weekday', () => {
+    const today = new Date();
+    const targetDay = (today.getDay() + 3) % 7;
+    const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const expected = new Date(today);
+    expected.setDate(today.getDate() + 3);
+    expect(parseDateInput(weekdays[targetDay])).toBe(expected.toISOString().slice(0, 10));
+  });
 });

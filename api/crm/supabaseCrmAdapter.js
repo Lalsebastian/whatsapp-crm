@@ -57,6 +57,61 @@ function mapComplaint(row) {
   };
 }
 
+function mapFeedback(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    bookingId: row.booking_id,
+    complaintId: row.complaint_id || null,
+    rating: row.rating,
+    comment: row.comment || null,
+    source: 'whatsapp',
+    createdAt: row.created_at,
+    respondedAt: row.responded_at,
+  };
+}
+
+function isUniqueViolation(error) {
+  return error && (
+    error.code === '23505'
+    || (error.response && error.response.data && error.response.data.code === '23505')
+  );
+}
+
+async function getSurveyRowsForBooking(customerId, bookingId) {
+  const rows = await db.get(
+    'satisfaction_surveys',
+    `customer_id=eq.${encodeURIComponent(customerId)}&booking_id=eq.${encodeURIComponent(bookingId)}&select=*&order=created_at.asc`
+  );
+  return rows || [];
+}
+
+function completedFeedback(rows) {
+  const row = rows.find((item) => item.responded_at);
+  return row ? { ...mapFeedback(row), duplicate: true, persistenceStatus: 'existing_completed' } : null;
+}
+
+async function completePendingFeedback(row, { customerId, bookingId, rating, comment }, now) {
+  const updated = await db.patch(
+    'satisfaction_surveys',
+    `id=eq.${encodeURIComponent(row.id)}&customer_id=eq.${encodeURIComponent(customerId)}&booking_id=eq.${encodeURIComponent(bookingId)}&responded_at=is.null`,
+    {
+      rating,
+      comment: comment || null,
+      responded_at: now,
+    }
+  );
+  if (updated && updated.length > 0) {
+    return { ...mapFeedback(updated[0]), duplicate: false, persistenceStatus: 'updated_pending' };
+  }
+
+  // Another request may have completed the pending row after our read but
+  // before the conditional PATCH. Re-read and return the winner without ever
+  // overwriting its rating or comment.
+  return completedFeedback(await getSurveyRowsForBooking(customerId, bookingId));
+}
+
 async function findCustomerByPhone(phone) {
   const existing = await db.get('customers', `phone=eq.${encodeURIComponent(phone)}&select=*`);
   if (existing && existing.length > 0) return mapCustomer(existing[0]);
@@ -131,6 +186,11 @@ async function getBookingStatus(reference) {
   return rows && rows.length > 0 ? mapBooking(rows[0]) : null;
 }
 
+async function getBookingById(bookingId) {
+  const rows = await db.get('bookings', `id=eq.${encodeURIComponent(bookingId)}&select=*`);
+  return rows && rows.length > 0 ? mapBooking(rows[0]) : null;
+}
+
 async function rescheduleBooking(bookingId, { date, time }) {
   const updated = await db.patch('bookings', `id=eq.${bookingId}`, {
     scheduled_date: date,
@@ -186,12 +246,89 @@ async function getComplaintStatus(reference) {
   return rows && rows.length > 0 ? mapComplaint(rows[0]) : null;
 }
 
-async function escalateToHuman({ customerId, phone, reason, summary }) {
+async function getOpenComplaintForBooking(customerId, bookingId) {
+  const rows = await db.get(
+    'complaints',
+    `customer_id=eq.${encodeURIComponent(customerId)}&booking_id=eq.${encodeURIComponent(bookingId)}&status=in.(open,in_progress,escalated)&select=*&order=created_at.desc&limit=1`
+  );
+  return rows && rows.length > 0 ? mapComplaint(rows[0]) : null;
+}
+
+async function createFeedback({ customerId, bookingId, phone, rating, comment }) {
+  const now = new Date().toISOString();
+  const existingRows = await getSurveyRowsForBooking(customerId, bookingId);
+  const completed = completedFeedback(existingRows);
+  if (completed) return completed;
+
+  const pending = existingRows.find((row) => !row.responded_at);
+  if (pending) {
+    const result = await completePendingFeedback(pending, { customerId, bookingId, rating, comment }, now);
+    if (result) return result;
+    const error = new Error('The pending feedback row changed before it could be completed');
+    error.code = 'FEEDBACK_CONCURRENT_UPDATE';
+    throw error;
+  }
+
+  try {
+    const created = await db.insert('satisfaction_surveys', {
+      customer_id: customerId,
+      booking_id: bookingId,
+      phone,
+      rating,
+      comment: comment || null,
+      asked_at: now,
+      sent_at: now,
+      responded_at: now,
+    });
+    const row = Array.isArray(created) ? created[0] : created;
+    return { ...mapFeedback(row), duplicate: false, persistenceStatus: 'inserted' };
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+
+    // Once UNIQUE(customer_id, booking_id) exists, a concurrent creator may
+    // win between our read and insert. Resolve the conflict by returning the
+    // completed winner or atomically completing its pending row.
+    const conflictRows = await getSurveyRowsForBooking(customerId, bookingId);
+    const conflictCompleted = completedFeedback(conflictRows);
+    if (conflictCompleted) return conflictCompleted;
+    const conflictPending = conflictRows.find((row) => !row.responded_at);
+    if (conflictPending) {
+      const result = await completePendingFeedback(
+        conflictPending,
+        { customerId, bookingId, rating, comment },
+        now
+      );
+      if (result) return result;
+    }
+    throw error;
+  }
+}
+
+async function getFeedbackForBooking(customerId, bookingId) {
+  const rows = await db.get(
+    'satisfaction_surveys',
+    `customer_id=eq.${encodeURIComponent(customerId)}&booking_id=eq.${encodeURIComponent(bookingId)}&responded_at=not.is.null&select=*&order=responded_at.desc&limit=1`
+  );
+  return rows && rows.length > 0 ? mapFeedback(rows[0]) : null;
+}
+
+async function markFeedbackFollowUp(feedbackId, { complaintId } = {}) {
+  if (!complaintId) return null;
+  const updated = await db.patch('satisfaction_surveys', `id=eq.${encodeURIComponent(feedbackId)}`, {
+    complaint_id: complaintId,
+  });
+  return mapFeedback(Array.isArray(updated) ? updated[0] : updated);
+}
+
+async function escalateToHuman({ customerId, phone, reason, summary, handoff }) {
+  const conversationSummary = handoff
+    ? `${summary || 'Human support requested.'}\n\nStructured handoff:\n${JSON.stringify(handoff)}`
+    : (summary || null);
   const created = await db.insert('escalations', {
     customer_id: customerId || null,
     phone,
     reason,
-    conversation_summary: summary || null,
+    conversation_summary: conversationSummary,
     status: 'open',
   });
   const row = Array.isArray(created) ? created[0] : created;
@@ -208,9 +345,14 @@ module.exports = {
   createBooking,
   getBookings,
   getBookingStatus,
+  getBookingById,
   rescheduleBooking,
   cancelBooking,
   createComplaint,
   getComplaintStatus,
+  getOpenComplaintForBooking,
+  createFeedback,
+  getFeedbackForBooking,
+  markFeedbackFollowUp,
   escalateToHuman,
 };

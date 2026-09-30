@@ -14,7 +14,13 @@ const { getCrmAdapter } = require('../crm');
 const { detectIntent } = require('../ai/intentService');
 const { downloadWhatsAppMedia } = require('../media/mediaHandler');
 const { transcribeAudio } = require('../media/transcription');
-const { evaluateTriggers, triggerEscalation, isStruggling } = require('../escalation/escalationService');
+const {
+  evaluateTriggers,
+  triggerEscalation,
+  isStruggling,
+  isExplicitHumanRequest,
+  safetyGuidanceFor,
+} = require('../escalation/escalationService');
 const unknownStreak = require('./unknownStreak');
 const testChannel = require('../whatsapp/testChannel');
 const { withKeyLock } = require('../reliability/keyedLock');
@@ -26,6 +32,15 @@ const MENU_KEYWORDS = ['menu', 'main menu', 'cancel', 'start', 'restart', 'start
 const SUPPORT_KEYWORDS = ['support', 'human', 'agent', 'talk to support', 'human agent', 'i need support'];
 const GREETING_KEYWORDS = ['hi', 'hello', 'hey', 'hii', 'start', 'menu'];
 const SERVICE_INFO_KEYWORDS = ['services', 'service information', 'what services do you offer'];
+const FEEDBACK_PATTERNS = [
+  /\brate my (?:service|booking)\b/i,
+  /\bgive feedback\b/i,
+  /\breview my (?:service|booking)\b/i,
+  /\bleave (?:a )?(?:review|feedback)\b/i,
+  /\bterrible service\b/i,
+  /\btechnician was very professional\b/i,
+  /\bjob (?:was )?done perfectly\b/i,
+];
 
 async function logMessage(phone, direction, type, content, extra = {}) {
   if (testChannel.isCapturing()) return; // /api/chat/test traffic shouldn't pollute real message history
@@ -104,6 +119,12 @@ async function processInboundMessage(inbound) {
     service: context.serviceName || context.inferredServiceName || null,
     matchSource: context.serviceMatchSource || null,
     serviceConfidence: context.serviceMatchConfidence ?? null,
+    changedField: context.correctionDebug ? context.correctionDebug.changedField : null,
+    previousValue: context.correctionDebug ? context.correctionDebug.previousValue : null,
+    newValue: context.correctionDebug ? context.correctionDebug.newValue : null,
+    rating: context.feedbackDebug ? context.feedbackDebug.rating : (context.rating ?? null),
+    followUpRequired: context.feedbackDebug ? !!context.feedbackDebug.followUpRequired : !!context.followUpRequired,
+    complaintLinked: context.feedbackDebug ? !!context.feedbackDebug.complaintLinked : !!context.complaintLinked,
   };
 }
 
@@ -122,9 +143,21 @@ async function route(session, customer, inbound) {
     return { reply: 'main_menu', intent: null, flow: 'main_menu', step: null };
   }
 
-  if (['HUMAN_SUPPORT', 'TALK_TO_SUPPORT'].includes(inbound.buttonId) || SUPPORT_KEYWORDS.includes(lowerText)) {
-    await entryPoints.HUMAN_SUPPORT(session, customer, inbound);
-    return { reply: 'escalated', intent: 'HUMAN_AGENT', flow: null, step: null };
+  const safetyGuidance = safetyGuidanceFor(inbound.text || '');
+  if (safetyGuidance) {
+    const trigger = evaluateTriggers({ text: inbound.text });
+    return createRouterHandoff(session, customer, inbound, trigger, null, safetyGuidance);
+  }
+
+  if (['HUMAN_SUPPORT', 'TALK_TO_SUPPORT'].includes(inbound.buttonId) || SUPPORT_KEYWORDS.includes(lowerText) || isExplicitHumanRequest(lowerText)) {
+    const outcome = await entryPoints.HUMAN_SUPPORT(session, customer, inbound);
+    return {
+      reply: outcome && outcome.handoff ? 'escalated' : 'escalation_failed',
+      intent: 'HUMAN_AGENT',
+      handoff: !!(outcome && outcome.handoff),
+      priority: outcome && outcome.priority,
+      handoffReason: (outcome && outcome.reason) || 'explicit_human_request',
+    };
   }
 
   if (session.currentFlow && session.currentStep && GREETING_KEYWORDS.includes(lowerText)) {
@@ -152,6 +185,11 @@ async function route(session, customer, inbound) {
   if (SERVICE_INFO_KEYWORDS.includes(lowerText)) {
     await entryPoints.SERVICE_INFO(session, customer, inbound);
     return { reply: 'handled', intent: 'GENERAL_QUERY', flow: 'SERVICE_INFO', step: null };
+  }
+
+  if (FEEDBACK_PATTERNS.some((pattern) => pattern.test(lowerText))) {
+    await entryPoints.GIVE_FEEDBACK(session, customer, inbound);
+    return { reply: 'handled', intent: 'FEEDBACK', flow: 'feedback', step: null };
   }
 
   if (inbound.buttonId) {
@@ -213,32 +251,7 @@ async function routeFreeText(session, customer, inbound) {
   });
 
   if (trigger.escalate) {
-    let escalationCreated = false;
-    try {
-      await triggerEscalation({
-        crm,
-        phone: session.phone,
-        customerId: customer ? customer.id : null,
-        reason: trigger.reason,
-        summary: buildEscalationSummary(inbound, intentResult),
-      });
-      escalationCreated = true;
-    } catch (err) {
-      logger.error('ROUTER', 'triggerEscalation failed:', err.message);
-    }
-    await sessionStore.clearFlow(session.phone);
-    const message = escalationCreated
-      ? "I've shared your message and the available conversation details with our support team, so you won't need to explain everything again. A team member will reply here as soon as possible."
-      : 'I\'m sorry, I could not connect you with our support team right now. Please try again shortly.';
-    await whatsapp.sendText(session.phone, message);
-    return {
-      reply: escalationCreated ? 'escalated' : 'escalation_failed',
-      intent: intentResult.intent,
-      confidence: intentResult.confidence,
-      flow: null,
-      step: null,
-      escalationReason: trigger.reason,
-    };
+    return createRouterHandoff(session, customer, inbound, trigger, intentResult);
   }
 
   const entryKey = intentToEntryPoint[intentResult.intent];
@@ -259,6 +272,55 @@ async function routeFreeText(session, customer, inbound) {
   };
 }
 
+async function createRouterHandoff(session, customer, inbound, trigger, intentResult, safetyMessage) {
+  if (safetyMessage) await whatsapp.sendText(session.phone, safetyMessage);
+  try {
+    const result = await triggerEscalation({
+      crm,
+      phone: session.phone,
+      customerId: customer ? customer.id : null,
+      customer,
+      session,
+      reason: trigger.reason,
+      originalCustomerMessage: inbound.text,
+      media: inbound.voice ? [{
+        type: 'audio',
+        mediaId: inbound.voice.mediaId,
+        transcript: inbound.voice.transcript,
+        detectedLanguage: inbound.voice.detectedLanguage,
+        transcriptionConfidence: inbound.voice.confidence,
+      }] : [],
+      botActions: safetyMessage ? ['Safety guidance provided'] : [],
+      suggestedNextAction: safetyMessage
+        ? 'Review the safety concern immediately and contact the customer.'
+        : 'Review the customer request and continue the conversation.',
+    });
+    await whatsapp.sendText(
+      session.phone,
+      "I've shared the details with our support team, including the information you've already provided, so you won't need to explain everything again. A team member will continue from here."
+    );
+    return {
+      reply: 'escalated',
+      intent: intentResult && intentResult.intent,
+      confidence: intentResult && intentResult.confidence,
+      handoff: true,
+      priority: result.priority,
+      handoffReason: trigger.reason,
+    };
+  } catch (err) {
+    logger.error('ROUTER', 'triggerEscalation failed:', err.message);
+    await whatsapp.sendText(session.phone, "I'm sorry, I wasn't able to connect this to our support team just now. Please try again in a moment.");
+    return {
+      reply: 'escalation_failed',
+      intent: intentResult && intentResult.intent,
+      confidence: intentResult && intentResult.confidence,
+      handoff: false,
+      priority: null,
+      handoffReason: trigger.reason,
+    };
+  }
+}
+
 async function routeVoiceNote(session, customer, inbound) {
   try {
     const normalized = await normalizeVoiceMessage(session, inbound);
@@ -267,13 +329,6 @@ async function routeVoiceNote(session, customer, inbound) {
     await handleVoiceFailure(session, inbound, err);
     return { reply: 'voice_note_unavailable', flow: session.currentFlow, step: session.currentStep };
   }
-}
-
-function buildEscalationSummary(inbound, intentResult) {
-  const voiceDetails = inbound.voice
-    ? ` Voice source: mediaId=${inbound.voice.mediaId}, language=${inbound.voice.detectedLanguage || 'unknown'}.`
-    : '';
-  return `Last message: "${inbound.text}" (intent=${intentResult.intent}, confidence=${intentResult.confidence}).${voiceDetails}`;
 }
 
 async function normalizeVoiceMessage(session, inbound) {

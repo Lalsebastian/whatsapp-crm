@@ -6,10 +6,15 @@ const conversationRouter = require('../../router/conversationRouter');
 conversationRouter.handleInboundMessage = vi.fn();
 const sessionStore = require('../../session/sessionStore');
 sessionStore.resetSession = vi.fn();
+sessionStore.getOrCreateSession = vi.fn();
 const unknownStreak = require('../../router/unknownStreak');
 unknownStreak.reset = vi.fn();
 
 const whatsapp = require('../../whatsapp/client');
+const feedback = require('../../flows/feedback');
+feedback.startFeedbackForBooking = vi.fn();
+const fakeCrm = require('../../crm/supabaseCrmAdapter');
+fakeCrm.findCustomerByPhone = vi.fn();
 const chatTestRoute = require('../../routes/chatTest');
 
 const originalEnabled = env.ENABLE_TEST_CHAT;
@@ -39,6 +44,9 @@ describe('authorized test-chat endpoint', () => {
     env.TEST_CHAT_SECRET = 'developer-secret';
     conversationRouter.handleInboundMessage.mockReset();
     sessionStore.resetSession.mockReset();
+    sessionStore.getOrCreateSession.mockReset();
+    feedback.startFeedbackForBooking.mockReset();
+    fakeCrm.findCustomerByPhone.mockReset();
     unknownStreak.reset.mockReset();
   });
 
@@ -90,6 +98,8 @@ describe('authorized test-chat endpoint', () => {
       return {
         intent: 'NEW_BOOKING', confidence: 0.96, flow: 'booking', step: 'select_property',
         service: 'Electrical', matchSource: 'semantic_hint', serviceConfidence: 0.95,
+        changedField: 'date', previousValue: '2026-10-01', newValue: '2026-10-02',
+        handoff: true, priority: 'HIGH', handoffReason: 'repeat_service_failure',
       };
     });
 
@@ -116,6 +126,12 @@ describe('authorized test-chat endpoint', () => {
       service: 'Electrical',
       matchSource: 'semantic_hint',
       serviceConfidence: 0.95,
+      changedField: 'date',
+      previousValue: '2026-10-01',
+      newValue: '2026-10-02',
+      handoff: true,
+      priority: 'HIGH',
+      handoffReason: 'repeat_service_failure',
       options: [
         { id: 'BOOK_SERVICE', title: 'Book a Service' },
         { id: 'MY_BOOKINGS', title: 'My Bookings' },
@@ -139,6 +155,46 @@ describe('authorized test-chat endpoint', () => {
     expect(sessionStore.resetSession).toHaveBeenCalledTimes(1);
     expect(sessionStore.resetSession).toHaveBeenCalledWith('971500000123');
     expect(unknownStreak.reset).toHaveBeenCalledWith('971500000123');
+  });
+
+  it('starts feedback through the protected developer action and returns feedback metadata', async () => {
+    env.ENABLE_TEST_CHAT = true;
+    const testSession = { phone: '971500000123', currentFlow: null, currentStep: null, context: {} };
+    const feedbackSession = {
+      ...testSession,
+      currentFlow: 'feedback',
+      currentStep: 'select_rating',
+      context: { rating: null, followUpRequired: false, complaintLinked: false },
+    };
+    sessionStore.getOrCreateSession.mockResolvedValueOnce(testSession).mockResolvedValueOnce(feedbackSession);
+    fakeCrm.findCustomerByPhone.mockResolvedValue({ id: 'customer-1', phone: testSession.phone });
+    feedback.startFeedbackForBooking.mockImplementation(async ({ session: current }) => {
+      await whatsapp.sendButtons(current.phone, 'How would you rate your experience?', [
+        { id: 'RATING_5', title: 'Excellent' },
+        { id: 'RATING_4', title: 'Good' },
+        { id: 'RATING_MORE', title: 'More Ratings' },
+      ]);
+      return { started: true };
+    });
+
+    const response = await fetch(`${baseUrl}/api/chat/test/start-feedback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-test-chat-secret': 'developer-secret' },
+      body: JSON.stringify({ phone: testSession.phone, bookingId: 'booking-1' }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(feedback.startFeedbackForBooking).toHaveBeenCalledWith(expect.objectContaining({
+      session: testSession,
+      customer: expect.objectContaining({ id: 'customer-1' }),
+      bookingId: 'booking-1',
+      allowUnverifiedCompletion: true,
+    }));
+    expect(body).toMatchObject({
+      intent: 'FEEDBACK', flow: 'feedback', step: 'select_rating', rating: null,
+      followUpRequired: false, complaintLinked: false,
+    });
   });
 
   it('does not reset a session with an invalid secret', async () => {

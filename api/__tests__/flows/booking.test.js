@@ -24,6 +24,7 @@ sessionStore.clearFlow = vi.fn();
 
 const intentService = require('../../ai/intentService');
 intentService.matchServiceToCatalog = vi.fn();
+intentService.analyzeBookingCorrection = vi.fn();
 
 const escalationService = require('../../escalation/escalationService');
 escalationService.triggerEscalation = vi.fn();
@@ -35,10 +36,13 @@ const booking = require('../../flows/booking');
 function resetAll() {
   [fakeCrm.getServices, fakeCrm.getServiceDetails, fakeCrm.getCustomerProperties, fakeCrm.addProperty, fakeCrm.getAvailability, fakeCrm.createBooking,
     whatsapp.sendText, whatsapp.sendButtons, whatsapp.sendListMessage, sessionStore.setFlow, sessionStore.clearFlow,
-    intentService.matchServiceToCatalog, escalationService.triggerEscalation]
+    intentService.matchServiceToCatalog, intentService.analyzeBookingCorrection, escalationService.triggerEscalation]
     .forEach((fn) => fn.mockReset());
   actionGuard.clearForTests();
   intentService.matchServiceToCatalog.mockResolvedValue({ serviceId: null, confidence: 0 });
+  intentService.analyzeBookingCorrection.mockResolvedValue({
+    service: null, locationHint: null, preferredDate: null, preferredTime: null, confidence: 0,
+  });
   fakeCrm.getCustomerProperties.mockResolvedValue([]);
 }
 
@@ -395,13 +399,292 @@ describe('booking flow — hybrid field collection', () => {
       '971500',
       expect.stringContaining('Which booking detail'),
       [
-        { id: 'CHANGE_SERVICE', title: 'Service' },
-        { id: 'CHANGE_ADDRESS', title: 'Address' },
-        { id: 'CHANGE_DATE_TIME', title: 'Date / Time' },
+        { id: 'CHANGE_SERVICE', title: 'Change Service' },
+        { id: 'CHANGE_PROPERTY', title: 'Change Address' },
+        { id: 'CHANGE_MORE', title: 'More Changes' },
       ]
     );
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
       '971500', 'booking', 'change_details', { cart: [], currentItem: item }
     );
+  });
+});
+
+describe('booking flow — smart review and corrections', () => {
+  const item = () => ({
+    serviceId: 'svc-electrical',
+    serviceName: 'Electrical',
+    propertyId: 'prop-home',
+    propertyLabel: 'Home — Kakkanad',
+    date: '2026-10-01',
+    time: '09:00',
+    issue: 'Bedroom light is not working',
+  });
+
+  beforeEach(resetAll);
+
+  it('shows the final review summary and required actions without creating a booking', async () => {
+    await booking.steps.review_item(
+      { phone: '971500', context: { cart: [], currentItem: item() } },
+      { id: 'cust1' },
+      { buttonId: 'PROCEED_TO_BOOKING' }
+    );
+
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
+      '971500',
+      expect.stringMatching(/Please review your booking details:[\s\S]*Service: Electrical[\s\S]*Location: Home — Kakkanad[\s\S]*Date:[\s\S]*Time:/),
+      [
+        { id: 'CONFIRM_BOOKING', title: 'Confirm Booking' },
+        { id: 'CHANGE_DETAILS', title: 'Change Details' },
+        { id: 'CANCEL_FLOW', title: 'Cancel' },
+      ]
+    );
+    expect(fakeCrm.createBooking).not.toHaveBeenCalled();
+  });
+
+  it('asks before cancelling and never writes a CRM booking', async () => {
+    const context = { cart: [item()], confirmationNonce: 'review-1' };
+    await booking.steps.confirm({ phone: '971500', context }, { id: 'cust1' }, { buttonId: 'CANCEL_FLOW' });
+
+    expect(sessionStore.clearFlow).not.toHaveBeenCalled();
+    expect(sessionStore.setFlow).toHaveBeenCalledWith('971500', 'booking', 'confirm_cancel', context);
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
+      '971500',
+      'Would you like to cancel this booking request?',
+      [
+        { id: 'CONFIRM_CANCEL_FLOW', title: 'Yes, Cancel' },
+        { id: 'KEEP_BOOKING', title: 'Keep Booking' },
+      ]
+    );
+
+    await booking.steps.confirm_cancel({ phone: '971500', context }, { id: 'cust1' }, { buttonId: 'CONFIRM_CANCEL_FLOW' });
+    expect(sessionStore.clearFlow).toHaveBeenCalledWith('971500');
+    expect(fakeCrm.createBooking).not.toHaveBeenCalled();
+  });
+
+  it('changes service while preserving address/date and invalidating the slot', async () => {
+    fakeCrm.getServices.mockResolvedValue([{ id: 'svc-plumbing', name: 'Plumbing', category: 'plumbing' }]);
+    await booking.steps.change_details(
+      { phone: '971500', context: { cart: [], currentItem: item() } },
+      { id: 'cust1' },
+      { buttonId: 'CHANGE_SERVICE' }
+    );
+    const correctionState = sessionStore.setFlow.mock.calls.at(-1)[3];
+    expect(correctionState).toMatchObject({
+      propertyId: 'prop-home', date: '2026-10-01', correctionMode: true, correctionFields: ['service'],
+    });
+    expect(correctionState.time).toBeUndefined();
+
+    fakeCrm.getServiceDetails.mockResolvedValue({ id: 'svc-plumbing', name: 'Plumbing' });
+    fakeCrm.getAvailability.mockResolvedValue(['11:00']);
+    await booking.steps.select_service(
+      { phone: '971500', context: correctionState },
+      { id: 'cust1' },
+      { buttonId: 'SVC_svc-plumbing' }
+    );
+
+    expect(fakeCrm.getAvailability).toHaveBeenCalledWith('svc-plumbing', '2026-10-01');
+    const slotState = sessionStore.setFlow.mock.calls.at(-1)[3];
+    await booking.steps.select_slot(
+      { phone: '971500', context: slotState },
+      { id: 'cust1' },
+      { buttonId: 'SLOT_11:00' }
+    );
+    expect(sessionStore.setFlow).toHaveBeenLastCalledWith(
+      '971500', 'booking', 'confirm',
+      expect.objectContaining({
+        cart: [expect.objectContaining({ serviceName: 'Plumbing', propertyId: 'prop-home', date: '2026-10-01', time: '11:00' })],
+        correctionDebug: expect.objectContaining({ changedField: 'service', previousValue: 'Electrical', newValue: 'Plumbing' }),
+      })
+    );
+  });
+
+  it('offers saved addresses and keeps service/date when changing address', async () => {
+    fakeCrm.getServiceDetails.mockResolvedValue({ id: 'svc-electrical', name: 'Electrical' });
+    fakeCrm.getCustomerProperties.mockResolvedValue([
+      { id: 'prop-home', label: 'Home', addressLine: 'Kakkanad', area: 'Kakkanad' },
+      { id: 'prop-office', label: 'Office', addressLine: 'Business Bay', area: 'Dubai' },
+    ]);
+
+    await booking.steps.change_details(
+      { phone: '971500', context: { cart: [], currentItem: item() } },
+      { id: 'cust1' },
+      { buttonId: 'CHANGE_PROPERTY' }
+    );
+
+    expect(sessionStore.setFlow).toHaveBeenCalledWith(
+      '971500', 'booking', 'select_property',
+      expect.objectContaining({ serviceId: 'svc-electrical', date: '2026-10-01', time: undefined, correctionMode: true })
+    );
+    expect(fakeCrm.createBooking).not.toHaveBeenCalled();
+  });
+
+  it('uses the More Changes submenu for separate date and time controls', async () => {
+    await booking.steps.change_details(
+      { phone: '971500', context: { cart: [], currentItem: item() } },
+      { id: 'cust1' },
+      { buttonId: 'CHANGE_MORE' }
+    );
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith('971500', 'What else would you like to change?', [
+      { id: 'CHANGE_DATE', title: 'Change Date' },
+      { id: 'CHANGE_TIME', title: 'Change Time' },
+      { id: 'BACK_TO_REVIEW', title: 'Back to Review' },
+    ]);
+
+    await booking.steps.change_more(
+      { phone: '971500', context: { cart: [], currentItem: item() } },
+      { id: 'cust1' },
+      { buttonId: 'CHANGE_DATE' }
+    );
+    expect(sessionStore.setFlow).toHaveBeenLastCalledWith(
+      '971500', 'booking', 'select_date',
+      expect.objectContaining({ serviceId: 'svc-electrical', propertyId: 'prop-home', date: undefined, time: undefined })
+    );
+
+    fakeCrm.getAvailability.mockResolvedValue(['09:00', '17:00']);
+    await booking.steps.change_more(
+      { phone: '971500', context: { cart: [], currentItem: item() } },
+      { id: 'cust1' },
+      { buttonId: 'CHANGE_TIME' }
+    );
+    expect(fakeCrm.getAvailability).toHaveBeenCalledWith('svc-electrical', '2026-10-01');
+    expect(sessionStore.setFlow).toHaveBeenLastCalledWith(
+      '971500', 'booking', 'select_slot',
+      expect.objectContaining({ date: '2026-10-01', time: undefined, correctionFields: ['time'] })
+    );
+    const timeState = sessionStore.setFlow.mock.calls.at(-1)[3];
+    await booking.steps.select_slot(
+      { phone: '971500', context: timeState },
+      { id: 'cust1' },
+      { buttonId: 'SLOT_17:00' }
+    );
+    expect(sessionStore.setFlow).toHaveBeenLastCalledWith(
+      '971500', 'booking', 'confirm',
+      expect.objectContaining({
+        cart: [expect.objectContaining({ time: '17:00' })],
+        correctionDebug: { changedField: 'time', previousValue: '09:00', newValue: '17:00' },
+      })
+    );
+  });
+
+  it('applies a typed date correction, clears the old slot, and returns to updated review', async () => {
+    intentService.analyzeBookingCorrection.mockResolvedValue({
+      service: null, locationHint: null, preferredDate: 'tomorrow', preferredTime: null, confidence: 0.98,
+    });
+    fakeCrm.getServiceDetails.mockResolvedValue({ id: 'svc-electrical', name: 'Electrical' });
+    fakeCrm.getAvailability.mockResolvedValue(['14:00']);
+
+    await booking.steps.confirm(
+      { phone: '971500', preferredLanguage: 'en', context: { cart: [item()] } },
+      { id: 'cust1' },
+      { text: 'actually make it tomorrow' }
+    );
+
+    const slotState = sessionStore.setFlow.mock.calls.at(-1)[3];
+    expect(fakeCrm.getAvailability).toHaveBeenCalledTimes(1);
+    expect(slotState.time).toBeUndefined();
+    await booking.steps.select_slot(
+      { phone: '971500', context: slotState },
+      { id: 'cust1' },
+      { buttonId: 'SLOT_14:00' }
+    );
+    const finalContext = sessionStore.setFlow.mock.calls.at(-1)[3];
+    expect(finalContext.cart[0].time).toBe('14:00');
+    expect(finalContext.cart[0].time).not.toBe('09:00');
+    expect(finalContext.correctionDebug.changedField).toBe('date');
+    expect(whatsapp.sendButtons.mock.calls.at(-1)[1]).toContain('Updated. Please review the booking again:');
+    expect(fakeCrm.createBooking).not.toHaveBeenCalled();
+  });
+
+  it('matches a typed saved-address correction and revalidates availability', async () => {
+    intentService.analyzeBookingCorrection.mockResolvedValue({
+      service: null, locationHint: 'office', preferredDate: null, preferredTime: null, confidence: 0.97,
+    });
+    fakeCrm.getCustomerProperties.mockResolvedValue([
+      { id: 'prop-home', label: 'Home', addressLine: 'Kakkanad' },
+      { id: 'prop-office', label: 'Office', addressLine: 'Business Bay', area: 'Dubai' },
+    ]);
+    fakeCrm.getServiceDetails.mockResolvedValue({ id: 'svc-electrical', name: 'Electrical' });
+    fakeCrm.getAvailability.mockResolvedValue(['15:00']);
+
+    await booking.steps.confirm(
+      { phone: '971500', context: { cart: [item()] } },
+      { id: 'cust1' },
+      { text: 'use my office address' }
+    );
+
+    const slotState = sessionStore.setFlow.mock.calls.at(-1)[3];
+    await booking.steps.select_slot(
+      { phone: '971500', context: slotState },
+      { id: 'cust1' },
+      { buttonId: 'SLOT_15:00' }
+    );
+    expect(sessionStore.setFlow).toHaveBeenLastCalledWith(
+      '971500', 'booking', 'confirm',
+      expect.objectContaining({ cart: [expect.objectContaining({ propertyId: 'prop-office', time: '15:00' })] })
+    );
+  });
+
+  it('accepts a directly typed new address while changing the property', async () => {
+    fakeCrm.addProperty.mockResolvedValue({ id: 'prop-new', addressLine: 'Villa 12, Al Barsha, Dubai' });
+    fakeCrm.getAvailability.mockResolvedValue(['12:00']);
+    const context = {
+      ...item(), cart: [], correctionMode: true, correctionFields: ['property'],
+      correctionPreviousItem: item(), time: undefined, propertyOptions: {},
+    };
+
+    await booking.steps.select_property(
+      { phone: '971500', context },
+      { id: 'cust1' },
+      { text: 'Villa 12, Al Barsha, Dubai' }
+    );
+
+    expect(fakeCrm.addProperty).toHaveBeenCalledWith('cust1', { addressLine: 'Villa 12, Al Barsha, Dubai' });
+    expect(fakeCrm.getAvailability).toHaveBeenCalledWith('svc-electrical', '2026-10-01');
+    expect(fakeCrm.createBooking).not.toHaveBeenCalled();
+  });
+
+  it('changes only the service from a natural typed correction', async () => {
+    intentService.analyzeBookingCorrection.mockResolvedValue({
+      service: 'Plumbing', locationHint: null, preferredDate: null, preferredTime: null, confidence: 0.99,
+    });
+    fakeCrm.getServices.mockResolvedValue([{ id: 'svc-plumbing', name: 'Plumbing', category: 'plumbing' }]);
+    fakeCrm.getAvailability.mockResolvedValue(['10:00']);
+
+    await booking.steps.confirm(
+      { phone: '971500', context: { cart: [item()] } },
+      { id: 'cust1' },
+      { text: 'make it plumbing instead' }
+    );
+
+    expect(fakeCrm.getAvailability).toHaveBeenCalledWith('svc-plumbing', '2026-10-01');
+    const slotState = sessionStore.setFlow.mock.calls.at(-1)[3];
+    expect(slotState).toMatchObject({ serviceId: 'svc-plumbing', propertyId: 'prop-home', time: undefined });
+    expect(fakeCrm.createBooking).not.toHaveBeenCalled();
+  });
+
+  it('applies a multi-field service/date/time correction from text or voice', async () => {
+    intentService.analyzeBookingCorrection.mockResolvedValue({
+      service: 'Plumbing', locationHint: null, preferredDate: 'tomorrow', preferredTime: 'morning', confidence: 0.99,
+    });
+    fakeCrm.getServices.mockResolvedValue([{ id: 'svc-plumbing', name: 'Plumbing', category: 'plumbing' }]);
+    fakeCrm.getAvailability.mockResolvedValue(['09:00', '17:00']);
+
+    await booking.steps.confirm(
+      { phone: '971500', preferredLanguage: 'en', context: { cart: [item()], voiceNotes: [] } },
+      { id: 'cust1' },
+      {
+        text: 'change it to plumbing tomorrow morning',
+        source: 'voice',
+        voice: { mediaId: 'voice-correction', transcript: 'change it to plumbing tomorrow morning' },
+      }
+    );
+
+    const finalContext = sessionStore.setFlow.mock.calls.at(-1)[3];
+    expect(finalContext.cart[0]).toMatchObject({
+      serviceId: 'svc-plumbing', serviceName: 'Plumbing', propertyId: 'prop-home', time: '09:00',
+    });
+    expect(finalContext.correctionDebug.changedField).toEqual(['service', 'date', 'time']);
+    expect(fakeCrm.createBooking).not.toHaveBeenCalled();
   });
 });

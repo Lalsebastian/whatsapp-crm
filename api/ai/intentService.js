@@ -6,6 +6,8 @@ const {
   buildIntentPrompt,
   buildComplaintCategoryPrompt,
   buildServiceMatchPrompt,
+  buildBookingCorrectionPrompt,
+  buildHandoffSummaryPrompt,
   INTENTS,
   COMPLAINT_CATEGORIES,
 } = require('./promptTemplates');
@@ -24,6 +26,13 @@ const UNKNOWN_RESULT = Object.freeze({
 });
 
 const UNKNOWN_COMPLAINT_CATEGORY = Object.freeze({ category: null, confidence: 0 });
+const UNKNOWN_BOOKING_CORRECTION = Object.freeze({
+  service: null,
+  locationHint: null,
+  preferredDate: null,
+  preferredTime: null,
+  confidence: 0,
+});
 
 function safeParseJson(text) {
   try {
@@ -116,4 +125,51 @@ async function matchServiceToCatalog(text, services, context = {}) {
   }
 }
 
-module.exports = { detectIntent, classifyComplaintCategory, matchServiceToCatalog };
+async function analyzeBookingCorrection(text, context = {}) {
+  if (!text) return UNKNOWN_BOOKING_CORRECTION;
+  try {
+    const prompt = buildBookingCorrectionPrompt(text, context);
+    const raw = await callGemini(prompt);
+    const parsed = safeParseJson(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      logger.warn('AI', 'Invalid booking correction response:', raw);
+      return UNKNOWN_BOOKING_CORRECTION;
+    }
+    const confidence = typeof parsed.confidence === 'number'
+      ? Math.max(0, Math.min(1, parsed.confidence))
+      : 0;
+    const optionalText = (value) => typeof value === 'string' && value.trim() ? value.trim() : null;
+    return {
+      service: optionalText(parsed.service),
+      locationHint: optionalText(parsed.locationHint),
+      preferredDate: optionalText(parsed.preferredDate),
+      preferredTime: optionalText(parsed.preferredTime),
+      confidence,
+    };
+  } catch (err) {
+    const detail = err.response ? `Gemini ${err.response.status}: ${JSON.stringify(err.response.data)}` : err.message;
+    logger.error('AI', 'Booking correction analysis failed:', detail);
+    return UNKNOWN_BOOKING_CORRECTION;
+  }
+}
+
+async function summarizeHandoff(handoff) {
+  try {
+    const raw = await callGemini(buildHandoffSummaryPrompt(handoff));
+    const parsed = safeParseJson(raw);
+    if (!parsed || typeof parsed.summary !== 'string' || !parsed.summary.trim()) return null;
+    return parsed.summary.trim().slice(0, 1000);
+  } catch (err) {
+    const detail = err.response ? `Gemini ${err.response.status}: ${JSON.stringify(err.response.data)}` : err.message;
+    logger.error('AI', 'Handoff summary generation failed:', detail);
+    return null;
+  }
+}
+
+module.exports = {
+  detectIntent,
+  classifyComplaintCategory,
+  matchServiceToCatalog,
+  analyzeBookingCorrection,
+  summarizeHandoff,
+};

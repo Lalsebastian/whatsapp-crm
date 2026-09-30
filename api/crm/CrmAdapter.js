@@ -60,11 +60,16 @@
  * @property {(input: {customerId: string, propertyId: string, serviceId: string, date: string, time: string, notes?: string}) => Promise<Booking>} createBooking
  * @property {(customerId: string, opts?: {limit?: number}) => Promise<Booking[]>} getBookings
  * @property {(reference: string) => Promise<Booking|null>} getBookingStatus
+ * @property {(bookingId: string) => Promise<Booking|null>} getBookingById
  * @property {(bookingId: string, input: {date: string, time: string}) => Promise<Booking>} rescheduleBooking
  * @property {(bookingId: string) => Promise<Booking>} cancelBooking
  * @property {(input: {customerId: string, bookingId?: string, category: string, description?: string, attachments?: Array<{waMediaId: string, mediaType: string}>}) => Promise<Complaint>} createComplaint
  * @property {(reference: string) => Promise<Complaint|null>} getComplaintStatus
- * @property {(input: {customerId?: string, phone: string, reason: string, summary?: string}) => Promise<{id: string}>} escalateToHuman
+ * @property {(customerId: string, bookingId: string) => Promise<Complaint|null>} getOpenComplaintForBooking
+ * @property {(input: {customerId: string, bookingId: string, phone: string, rating: number, comment?: string}) => Promise<Object>} createFeedback
+ * @property {(customerId: string, bookingId: string) => Promise<Object|null>} getFeedbackForBooking
+ * @property {(feedbackId: string, input: {complaintId?: string}) => Promise<Object>} markFeedbackFollowUp
+ * @property {(input: {customerId?: string, phone: string, reason: string, summary?: string, handoff?: Object}) => Promise<{id: string}>} escalateToHuman
  */
 
 module.exports = {};
