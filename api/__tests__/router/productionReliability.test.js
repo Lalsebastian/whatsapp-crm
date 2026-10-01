@@ -18,11 +18,17 @@ db.insert = vi.fn();
 
 const crmAdapter = require('../../crm/supabaseCrmAdapter');
 crmAdapter.findCustomerByPhone = vi.fn(async () => ({ id: 'cust1' }));
+crmAdapter.getCustomerProperties = vi.fn();
+crmAdapter.getBookings = vi.fn();
+crmAdapter.getActiveComplaints = vi.fn();
 
 const dedup = require('../../router/dedup');
 const messageOrder = require('../../router/messageOrder');
 const keyedLock = require('../../reliability/keyedLock');
 const { handleInboundMessage } = require('../../router/conversationRouter');
+const analytics = require('../../analytics/eventWriter');
+const lifecycle = require('../../analytics/conversationLifecycle');
+const profiles = require('../../customer/customerProfileService');
 
 function idleSession(overrides = {}) {
   return {
@@ -35,12 +41,19 @@ describe('production conversation reliability', () => {
   beforeEach(() => {
     [sessionStore.getOrCreateSession, sessionStore.updateSession, sessionStore.clearFlow, sessionStore.setFlow,
       sessionStore.setHumanTakeover, sessionStore.touchActivity, whatsapp.sendText, whatsapp.sendButtons,
-      whatsapp.sendListMessage, db.insert, crmAdapter.findCustomerByPhone].forEach((fn) => fn.mockReset());
+      whatsapp.sendListMessage, db.insert, crmAdapter.findCustomerByPhone, crmAdapter.getCustomerProperties,
+      crmAdapter.getBookings, crmAdapter.getActiveComplaints].forEach((fn) => fn.mockReset());
     crmAdapter.findCustomerByPhone.mockResolvedValue({ id: 'cust1' });
+    crmAdapter.getCustomerProperties.mockResolvedValue([]);
+    crmAdapter.getBookings.mockResolvedValue([]);
+    crmAdapter.getActiveComplaints.mockResolvedValue([]);
     db.insert.mockResolvedValue([]);
     dedup.clearForTests();
     messageOrder.clearForTests();
     keyedLock.clearForTests();
+    analytics.clearTestEvents();
+    lifecycle.clearForTests();
+    profiles.clearForTests();
   });
 
   it('processes a duplicate WhatsApp message ID only once', async () => {
@@ -54,6 +67,8 @@ describe('production conversation reliability', () => {
     expect(second.duplicate).toBe(true);
     expect(whatsapp.sendButtons).toHaveBeenCalledTimes(1);
     expect(crmAdapter.findCustomerByPhone).toHaveBeenCalledTimes(1);
+    expect(analytics.getTestEvents('971500').filter((event) => event.eventType === 'CONVERSATION_STARTED'))
+      .toHaveLength(1);
   });
 
   it('recognizes a message ID already claimed by persistent storage', async () => {
@@ -97,6 +112,8 @@ describe('production conversation reliability', () => {
     expect(result.reply).toBe('expired_session_menu');
     expect(whatsapp.sendText).toHaveBeenCalledWith('971500', expect.stringContaining('previous booking session has expired'));
     expect(whatsapp.sendButtons).toHaveBeenCalledTimes(1);
+    expect(analytics.getTestEvents('971500').map((event) => event.eventType))
+      .toEqual(expect.arrayContaining(['CONVERSATION_EXPIRED', 'BOOKING_ABANDONED']));
   });
 
   it('resumes a recent session instead of restarting it', async () => {

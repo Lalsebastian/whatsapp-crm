@@ -5,6 +5,7 @@ const db = require('../db/supabaseClient');
 const { generateReference } = require('../utils/reference');
 
 const DEFAULT_SLOTS = ['09:00', '11:00', '13:00', '15:00', '17:00'];
+const PREFERENCE_LANGUAGES = new Set(['en', 'ml', 'manglish', 'hi', 'hinglish']);
 
 function mapCustomer(row) {
   if (!row) return null;
@@ -13,7 +14,15 @@ function mapCustomer(row) {
 
 function mapProperty(row) {
   if (!row) return null;
-  return { id: row.id, customerId: row.customer_id, label: row.label, addressLine: row.address_line, area: row.area, city: row.city };
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    label: row.label,
+    addressLine: row.address_line,
+    area: row.area,
+    city: row.city,
+    isDefault: !!row.is_default,
+  };
 }
 
 function mapService(row) {
@@ -114,16 +123,71 @@ async function completePendingFeedback(row, { customerId, bookingId, rating, com
 
 async function findCustomerByPhone(phone) {
   const existing = await db.get('customers', `phone=eq.${encodeURIComponent(phone)}&select=*`);
-  if (existing && existing.length > 0) return mapCustomer(existing[0]);
+  if (existing && existing.length > 0) return { ...mapCustomer(existing[0]), returningCustomer: true };
   // A WhatsApp phone number is enough identification for a home-services
   // customer — auto-register on first contact rather than forcing a signup step.
   const created = await db.upsert('customers', { phone }, { onConflict: 'phone' });
-  return mapCustomer(Array.isArray(created) ? created[0] : created);
+  return { ...mapCustomer(Array.isArray(created) ? created[0] : created), returningCustomer: false };
 }
 
 async function getCustomerProperties(customerId) {
   const rows = await db.get('properties', `customer_id=eq.${customerId}&select=*&order=is_default.desc,created_at.asc`);
   return (rows || []).map(mapProperty);
+}
+
+async function getCustomerPreferences(customerId) {
+  const [customers, properties] = await Promise.all([
+    db.get('customers', `id=eq.${encodeURIComponent(customerId)}&select=id,preferred_language&limit=1`),
+    getCustomerProperties(customerId),
+  ]);
+  const customer = customers && customers[0];
+  if (!customer) return null;
+  const defaultProperty = properties.find((property) => property.isDefault) || null;
+  return {
+    customerId,
+    preferredLanguage: customer.preferred_language || 'en',
+    defaultPropertyId: defaultProperty ? defaultProperty.id : null,
+  };
+}
+
+async function updateCustomerPreferences(customerId, { preferredLanguage, defaultPropertyId } = {}) {
+  if (preferredLanguage) {
+    if (!PREFERENCE_LANGUAGES.has(preferredLanguage)) {
+      const error = new Error('Unsupported preferred language');
+      error.code = 'INVALID_PREFERRED_LANGUAGE';
+      throw error;
+    }
+    await db.patch('customers', `id=eq.${encodeURIComponent(customerId)}`, {
+      preferred_language: preferredLanguage,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  if (defaultPropertyId) {
+    const owned = await db.get(
+      'properties',
+      `id=eq.${encodeURIComponent(defaultPropertyId)}&customer_id=eq.${encodeURIComponent(customerId)}&select=id&limit=1`
+    );
+    if (!owned || owned.length === 0) {
+      const error = new Error('The selected property does not belong to this customer');
+      error.code = 'INVALID_DEFAULT_PROPERTY';
+      throw error;
+    }
+    // Mark the requested property first so a partial provider failure never
+    // leaves the customer without any usable default.
+    await db.patch(
+      'properties',
+      `id=eq.${encodeURIComponent(defaultPropertyId)}&customer_id=eq.${encodeURIComponent(customerId)}`,
+      { is_default: true }
+    );
+    await db.patch(
+      'properties',
+      `customer_id=eq.${encodeURIComponent(customerId)}&id=neq.${encodeURIComponent(defaultPropertyId)}&is_default=eq.true`,
+      { is_default: false }
+    );
+  }
+
+  return getCustomerPreferences(customerId);
 }
 
 async function addProperty(customerId, property) {
@@ -145,6 +209,14 @@ async function getServices() {
 async function getServiceDetails(serviceId) {
   const rows = await db.get('services', `id=eq.${serviceId}&select=*`);
   return rows && rows.length > 0 ? mapService(rows[0]) : null;
+}
+
+// The current Supabase CRM schema has no service-area table or coordinate
+// coverage rules. Returning an explicit capability result keeps the booking
+// sequence correct without inventing unsupported areas. A future CRM adapter
+// can replace this with a real service/location check before availability.
+async function checkServiceability(_serviceId, _location) {
+  return { serviceable: true, source: 'crm_not_configured' };
 }
 
 async function getAvailability(serviceId, date) {
@@ -254,6 +326,14 @@ async function getOpenComplaintForBooking(customerId, bookingId) {
   return rows && rows.length > 0 ? mapComplaint(rows[0]) : null;
 }
 
+async function getActiveComplaints(customerId, { limit = 5 } = {}) {
+  const rows = await db.get(
+    'complaints',
+    `customer_id=eq.${encodeURIComponent(customerId)}&status=in.(open,in_progress,escalated)&select=*&order=created_at.desc&limit=${limit}`
+  );
+  return (rows || []).map(mapComplaint);
+}
+
 async function createFeedback({ customerId, bookingId, phone, rating, comment }) {
   const now = new Date().toISOString();
   const existingRows = await getSurveyRowsForBooking(customerId, bookingId);
@@ -338,9 +418,12 @@ async function escalateToHuman({ customerId, phone, reason, summary, handoff }) 
 module.exports = {
   findCustomerByPhone,
   getCustomerProperties,
+  getCustomerPreferences,
+  updateCustomerPreferences,
   addProperty,
   getServices,
   getServiceDetails,
+  checkServiceability,
   getAvailability,
   createBooking,
   getBookings,
@@ -351,6 +434,7 @@ module.exports = {
   createComplaint,
   getComplaintStatus,
   getOpenComplaintForBooking,
+  getActiveComplaints,
   createFeedback,
   getFeedbackForBooking,
   markFeedbackFollowUp,

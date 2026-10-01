@@ -182,6 +182,19 @@ function aggregateChatbotAnalytics(events = [], services = [], options = {}) {
   const ratingEvents = scoped.filter((event) => event.event_type === 'FEEDBACK_RATING_RECEIVED');
   const ratings = ratingEvents.map((event) => Number(metadata(event).rating)).filter((rating) => rating >= 1 && rating <= 5);
   const lowRatings = ratings.filter((rating) => rating <= 3).length;
+  const bookingMessageEvents = scoped.filter((event) => event.event_type === 'BOOKING_MESSAGES_TO_COMPLETE');
+  const botTurns = bookingMessageEvents.map((event) => Number(metadata(event).botMessages)).filter(Number.isFinite);
+  const customerTurns = bookingMessageEvents.map((event) => Number(metadata(event).customerMessages)).filter(Number.isFinite);
+  const totalTurns = bookingMessageEvents.map((event) => Number(metadata(event).totalMessages)).filter(Number.isFinite);
+  const firstMessageFields = bookingMessageEvents
+    .map((event) => Number(metadata(event).fieldsExtractedFirstMessage))
+    .filter(Number.isFinite);
+  const redundantQuestionsAvoided = bookingMessageEvents.reduce(
+    (total, event) => total + (Number(metadata(event).redundantQuestionsAvoided) || 0),
+    0
+  );
+  const withinFourBotMessages = bookingMessageEvents.filter((event) => metadata(event).withinFourBotMessages === true).length;
+  const fastPathBookings = bookingMessageEvents.filter((event) => metadata(event).fastPathUsed === true).length;
 
   const serviceNames = new Map(services.map((service) => [service.id, service.name]));
   const selectedServices = scoped.filter((event) => event.event_type === 'SERVICE_SELECTED' && event.service_id);
@@ -227,6 +240,11 @@ function aggregateChatbotAnalytics(events = [], services = [], options = {}) {
     returningCustomerRate: safeRatio(returningCustomers, customersIdentified),
     averageCsat: average(ratings),
     lowRatingRate: safeRatio(lowRatings, ratings.length),
+    averageBotMessagesPerBooking: average(botTurns),
+    averageCustomerMessagesPerBooking: average(customerTurns),
+    averageTotalTurnsPerBooking: average(totalTurns),
+    bookingsWithinFourBotMessagesRate: safeRatio(withinFourBotMessages, bookingMessageEvents.length),
+    fastPathBookingRate: safeRatio(fastPathBookings, bookingMessageEvents.length),
   };
 
   const summary = conversations === 0
@@ -288,6 +306,18 @@ function aggregateChatbotAnalytics(events = [], services = [], options = {}) {
       new: Math.max(0, customersIdentified - returningCustomers),
       returningRate: safeRatio(returningCustomers, customersIdentified),
       method: 'event_based',
+    },
+    messageEfficiency: {
+      successfulBookingsMeasured: bookingMessageEvents.length,
+      averageBotMessagesPerBooking: average(botTurns),
+      averageCustomerMessagesPerBooking: average(customerTurns),
+      averageTotalTurnsPerBooking: average(totalTurns),
+      averageFieldsExtractedFromFirstMessage: average(firstMessageFields),
+      bookingsWithinFourBotMessages: withinFourBotMessages,
+      bookingsWithinFourBotMessagesRate: safeRatio(withinFourBotMessages, bookingMessageEvents.length),
+      redundantQuestionsAvoided,
+      fastPathBookings,
+      fastPathBookingRate: safeRatio(fastPathBookings, bookingMessageEvents.length),
     },
     csat: {
       responses: ratings.length,

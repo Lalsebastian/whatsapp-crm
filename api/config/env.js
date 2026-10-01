@@ -27,6 +27,7 @@ const env = {
   // later can't lock the webhook out of its own tables. Falls back to the anon
   // key until the service-role secret is added to Render.
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY,
+  SUPABASE_SERVICE_ROLE_CONFIGURED: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
 
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
 
@@ -42,6 +43,10 @@ const env = {
   REVIEWS_ENABLED: booleanValue(process.env.REVIEWS_ENABLED),
   PUBLIC_REVIEW_URL: process.env.PUBLIC_REVIEW_URL || '',
   REVIEW_MIN_RATING: Math.min(5, Math.max(1, Number(process.env.REVIEW_MIN_RATING) || 4)),
+
+  // Dedicated HMAC salt for pseudonymous analytics identifiers. Keep this
+  // server-side and stable across deployments so phone hashes remain useful.
+  ANALYTICS_HASH_SALT: process.env.ANALYTICS_HASH_SALT || '',
 
   // Management analytics is intentionally separate from the public CRM
   // frontend until real dashboard authentication is available. Both values

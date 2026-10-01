@@ -10,6 +10,7 @@ const complaintStatus = require('../flows/complaintStatus');
 const serviceInfo = require('../flows/serviceInfo');
 const support = require('../flows/support');
 const feedback = require('../flows/feedback');
+const recentBookingContext = require('../flows/recentBookingContext');
 
 // Entry points reachable from a main-menu tap or a mapped AI intent.
 const entryPoints = {
@@ -48,6 +49,7 @@ const stepHandlers = {
   complaint: complaint.steps,
   complaint_status: complaintStatus.steps,
   feedback: feedback.steps,
+  recent_booking_context: recentBookingContext.steps,
 };
 
 module.exports = { entryPoints, intentToEntryPoint, stepHandlers };

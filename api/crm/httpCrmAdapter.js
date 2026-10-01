@@ -28,9 +28,12 @@ function notImplemented(method) {
 
 async function findCustomerByPhone() { return notImplemented('findCustomerByPhone'); }
 async function getCustomerProperties() { return notImplemented('getCustomerProperties'); }
+async function getCustomerPreferences() { return notImplemented('getCustomerPreferences'); }
+async function updateCustomerPreferences() { return notImplemented('updateCustomerPreferences'); }
 async function addProperty() { return notImplemented('addProperty'); }
 async function getServices() { return notImplemented('getServices'); }
 async function getServiceDetails() { return notImplemented('getServiceDetails'); }
+async function checkServiceability() { return notImplemented('checkServiceability'); }
 async function getAvailability() { return notImplemented('getAvailability'); }
 async function createBooking() { return notImplemented('createBooking'); }
 async function getBookings() { return notImplemented('getBookings'); }
@@ -41,6 +44,7 @@ async function cancelBooking() { return notImplemented('cancelBooking'); }
 async function createComplaint() { return notImplemented('createComplaint'); }
 async function getComplaintStatus() { return notImplemented('getComplaintStatus'); }
 async function getOpenComplaintForBooking() { return notImplemented('getOpenComplaintForBooking'); }
+async function getActiveComplaints() { return notImplemented('getActiveComplaints'); }
 async function createFeedback() { return notImplemented('createFeedback'); }
 async function getFeedbackForBooking() { return notImplemented('getFeedbackForBooking'); }
 async function markFeedbackFollowUp() { return notImplemented('markFeedbackFollowUp'); }
@@ -49,9 +53,12 @@ async function escalateToHuman() { return notImplemented('escalateToHuman'); }
 module.exports = {
   findCustomerByPhone,
   getCustomerProperties,
+  getCustomerPreferences,
+  updateCustomerPreferences,
   addProperty,
   getServices,
   getServiceDetails,
+  checkServiceability,
   getAvailability,
   createBooking,
   getBookings,
@@ -62,6 +69,7 @@ module.exports = {
   createComplaint,
   getComplaintStatus,
   getOpenComplaintForBooking,
+  getActiveComplaints,
   createFeedback,
   getFeedbackForBooking,
   markFeedbackFollowUp,

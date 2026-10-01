@@ -10,6 +10,8 @@ const { handleInboundMessage } = require('../router/conversationRouter');
 const testChannel = require('../whatsapp/testChannel');
 const sessionStore = require('../session/sessionStore');
 const unknownStreak = require('../router/unknownStreak');
+const analytics = require('../analytics/eventWriter');
+const messageBudget = require('../analytics/messageBudget');
 const feedback = require('../flows/feedback');
 const { getCrmAdapter } = require('../crm');
 
@@ -59,6 +61,8 @@ router.post('/reset', requireTestChatAccess, async (req, res) => {
   try {
     await sessionStore.resetSession(phone);
     unknownStreak.reset(phone);
+    analytics.clearTestEvents(phone);
+    messageBudget.reset(phone);
     return res.json({ success: true, message: 'Test session reset.' });
   } catch (err) {
     logger.error('CHAT_TEST', 'resetSession failed:', err.message);
@@ -89,6 +93,25 @@ function responsePayload(result, messages) {
     priority: result.priority || null,
     handoffReason: result.handoffReason || null,
     debugReason: result.debugReason || null,
+    customerId: result.customerId || null,
+    returningCustomer: !!result.returningCustomer,
+    preferredLanguage: result.preferredLanguage || null,
+    defaultProperty: result.defaultProperty || null,
+    profileSource: result.profileSource || null,
+    analyticsEvents: result.analyticsEvents || [],
+    knownFields: result.knownFields || [],
+    missingFields: result.missingFields || [],
+    ambiguousFields: result.ambiguousFields || [],
+    requiresRevalidation: result.requiresRevalidation || [],
+    room: result.room || null,
+    issue: result.issue || null,
+    recommendedServices: result.recommendedServices || [],
+    serviceabilityFiltered: !!result.serviceabilityFiltered,
+    fastPathUsed: !!result.fastPathUsed,
+    customerTurnCount: result.customerTurnCount || 0,
+    botTurnCount: result.botTurnCount || 0,
+    redundantQuestionsAvoided: result.redundantQuestionsAvoided || 0,
+    messageCount: result.messageCount || { customerMessages: 0, botMessages: 0 },
   };
 }
 

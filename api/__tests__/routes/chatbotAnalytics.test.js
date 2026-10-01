@@ -76,4 +76,48 @@ describe('chatbot analytics API security', () => {
     expect(payload).toEqual({ range: '30d', totals: { events: 42 }, kpis: { conversations: 10 }, services: [] });
     expect(JSON.stringify(payload)).not.toMatch(/phone_hash|customer_id|session_id|correlation_id|metadata/);
   });
+
+  it('returns 503 without exposing Supabase details when the datastore is unavailable', async () => {
+    env.ENABLE_CHATBOT_ANALYTICS_DASHBOARD = true;
+    dashboardService.getChatbotAnalytics.mockRejectedValue(Object.assign(new Error('permission denied for table'), {
+      code: 'CHATBOT_ANALYTICS_DATASTORE_UNAVAILABLE',
+      statusCode: 503,
+      stage: 'event_query',
+      isDependencyError: true,
+      supabaseStatus: 403,
+      supabaseCode: '42501',
+      supabaseMessage: 'permission denied for table chatbot_analytics_events',
+    }));
+
+    const response = await fetch(`${baseUrl}/api/analytics/chatbot?range=7d`, {
+      headers: { 'x-chatbot-analytics-secret': 'management-secret' },
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload).toEqual({
+      error: 'Chatbot analytics is temporarily unavailable.',
+      code: 'CHATBOT_ANALYTICS_UNAVAILABLE',
+    });
+    expect(JSON.stringify(payload)).not.toMatch(/permission denied|42501|chatbot_analytics_events/);
+  });
+
+  it('keeps genuine aggregation failures as a sanitized 500', async () => {
+    env.ENABLE_CHATBOT_ANALYTICS_DASHBOARD = true;
+    dashboardService.getChatbotAnalytics.mockRejectedValue(Object.assign(new TypeError('internal detail'), {
+      stage: 'aggregation',
+    }));
+
+    const response = await fetch(`${baseUrl}/api/analytics/chatbot?range=7d`, {
+      headers: { 'x-chatbot-analytics-secret': 'management-secret' },
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload).toEqual({
+      error: 'Unable to load chatbot analytics.',
+      code: 'CHATBOT_ANALYTICS_FAILED',
+    });
+    expect(JSON.stringify(payload)).not.toContain('internal detail');
+  });
 });

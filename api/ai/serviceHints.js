@@ -15,7 +15,7 @@ const PROFILES = [
   {
     key: 'ac',
     catalogTerms: ['ac', 'air conditioning', 'air conditioner'],
-    hints: ['ac', 'air conditioner', 'air conditioning', 'cooling', 'ac leak', 'ac noise'],
+    hints: ['ac', 'air conditioner', 'air conditioning', 'ac leak', 'ac noise'],
   },
   {
     key: 'pest_control',
@@ -24,8 +24,13 @@ const PROFILES = [
   },
   {
     key: 'home_cleaning',
-    catalogTerms: ['cleaning', 'home cleaning', 'house cleaning'],
-    hints: ['cleaning', 'deep cleaning', 'house cleaning', 'home cleaning', 'maid'],
+    catalogTerms: ['cleaning', 'home cleaning', 'house cleaning', 'deep cleaning'],
+    hints: ['cleaning', 'clean', 'dirty', 'deep cleaning', 'house cleaning', 'home cleaning', 'maid'],
+  },
+  {
+    key: 'appliance_repair',
+    catalogTerms: ['appliance', 'appliance repair', 'fridge repair', 'refrigerator repair'],
+    hints: ['appliance', 'fridge', 'refrigerator', 'washing machine', 'dishwasher', 'oven'],
   },
 ];
 

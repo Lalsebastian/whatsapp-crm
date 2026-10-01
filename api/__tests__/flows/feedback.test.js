@@ -23,6 +23,7 @@ const escalation = require('../../escalation/escalationService');
 escalation.triggerEscalation = vi.fn();
 
 const actionGuard = require('../../reliability/actionGuard');
+const analytics = require('../../analytics/eventWriter');
 const env = require('../../config/env');
 const feedback = require('../../flows/feedback');
 
@@ -63,6 +64,7 @@ beforeEach(() => {
   fakeCrm.getOpenComplaintForBooking.mockResolvedValue(null);
   fakeCrm.createFeedback.mockResolvedValue({ id: 'feedback-1', rating: 5 });
   actionGuard.clearForTests();
+  analytics.clearTestEvents();
   env.REVIEWS_ENABLED = false;
   env.PUBLIC_REVIEW_URL = '';
   env.REVIEW_MIN_RATING = 4;
@@ -126,6 +128,8 @@ describe('feedback flow eligibility and rating UX', () => {
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
       '971500000000', 'feedback', 'awaiting_comment', expect.objectContaining({ rating })
     );
+    expect(analytics.getTestEvents('971500000000').map((event) => event.eventType))
+      .toContain('FEEDBACK_RATING_RECEIVED');
   });
 
   it.each([

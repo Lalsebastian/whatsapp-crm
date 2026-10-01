@@ -53,9 +53,12 @@
  * @typedef {Object} CrmAdapter
  * @property {(phone: string) => Promise<Customer>} findCustomerByPhone
  * @property {(customerId: string) => Promise<Property[]>} getCustomerProperties
+ * @property {(customerId: string) => Promise<{customerId: string, preferredLanguage: string, defaultPropertyId?: string|null}|null>} getCustomerPreferences
+ * @property {(customerId: string, input: {preferredLanguage?: string, defaultPropertyId?: string}) => Promise<Object>} updateCustomerPreferences
  * @property {(customerId: string, property: {label?: string, addressLine: string, area?: string, city?: string}) => Promise<Property>} addProperty
  * @property {() => Promise<Service[]>} getServices
  * @property {(serviceId: string) => Promise<Service|null>} getServiceDetails
+ * @property {(serviceId: string, location: Object) => Promise<{serviceable: boolean, source: string}>} checkServiceability
  * @property {(serviceId: string, date: string) => Promise<string[]>} getAvailability
  * @property {(input: {customerId: string, propertyId: string, serviceId: string, date: string, time: string, notes?: string}) => Promise<Booking>} createBooking
  * @property {(customerId: string, opts?: {limit?: number}) => Promise<Booking[]>} getBookings
@@ -66,6 +69,7 @@
  * @property {(input: {customerId: string, bookingId?: string, category: string, description?: string, attachments?: Array<{waMediaId: string, mediaType: string}>}) => Promise<Complaint>} createComplaint
  * @property {(reference: string) => Promise<Complaint|null>} getComplaintStatus
  * @property {(customerId: string, bookingId: string) => Promise<Complaint|null>} getOpenComplaintForBooking
+ * @property {(customerId: string, opts?: {limit?: number}) => Promise<Complaint[]>} getActiveComplaints
  * @property {(input: {customerId: string, bookingId: string, phone: string, rating: number, comment?: string}) => Promise<Object>} createFeedback
  * @property {(customerId: string, bookingId: string) => Promise<Object|null>} getFeedbackForBooking
  * @property {(feedbackId: string, input: {complaintId?: string}) => Promise<Object>} markFeedbackFollowUp

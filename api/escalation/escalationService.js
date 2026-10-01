@@ -228,6 +228,14 @@ async function buildHandoff({
       step: session.currentStep,
       preferredLanguage: session.preferredLanguage || (customer && customer.preferredLanguage),
     },
+    preferences: customer && customer.profile ? {
+      preferredLanguage: customer.profile.preferredLanguage,
+      defaultProperty: customer.profile.defaultProperty && {
+        id: customer.profile.defaultProperty.id,
+        label: customer.profile.defaultProperty.label,
+        area: customer.profile.defaultProperty.area,
+      },
+    } : undefined,
     booking,
     complaint,
     feedback: suppliedFeedback,
@@ -261,7 +269,18 @@ async function triggerEscalation(input) {
     bookingReference: handoff.booking && handoff.booking.reference,
     complaintReference: handoff.complaint && handoff.complaint.reference,
   }) || {};
-  logger.audit('HANDOFF_REQUESTED', { phone, customerId, reason, priority, result: 'requested', ...references });
+  const analyticsContext = {
+    phone,
+    customerId,
+    sessionId: (input.session && input.session.phone) || phone,
+    flow: handoff.context && handoff.context.flow,
+    step: handoff.context && handoff.context.step,
+    bookingId: handoff.booking && handoff.booking.id,
+    complaintId: handoff.complaint && handoff.complaint.id,
+    bookingLinked: !!(handoff.booking && (handoff.booking.id || handoff.booking.reference)),
+    complaintLinked: !!(handoff.complaint && (handoff.complaint.id || handoff.complaint.reference)),
+  };
+  logger.audit('HANDOFF_REQUESTED', { ...analyticsContext, reason, priority, result: 'requested', ...references });
   try {
     const escalation = await crm.escalateToHuman({
       customerId,
@@ -272,17 +291,17 @@ async function triggerEscalation(input) {
     });
     await sessionStore.setHumanTakeover(phone, true);
     logger.audit('HANDOFF_CREATED', {
-      phone, customerId, reason, priority, result: 'success',
+      ...analyticsContext, reason, priority, result: 'success',
       escalationId: escalation && escalation.id, ...references,
     });
     logger.audit('HUMAN_TAKEOVER_STARTED', {
-      phone, customerId, reason, priority, result: 'success',
+      ...analyticsContext, reason, priority, result: 'success',
       escalationId: escalation && escalation.id, ...references,
     });
     return { ...escalation, handoff, priority, reason };
   } catch (error) {
     logger.audit('HANDOFF_FAILED', {
-      phone, customerId, reason, priority,
+      ...analyticsContext, reason, priority,
       result: error.uncertain ? 'uncertain' : 'failed',
       error: error.code || error.message, ...references,
     });

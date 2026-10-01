@@ -24,4 +24,24 @@ describe('WhatsApp audio normalization', () => {
       caption: undefined,
     });
   });
+
+  it('normalizes a customer-shared WhatsApp location without inventing fields', () => {
+    const inbound = normalizeInboundMessage({
+      entry: [{ changes: [{ value: { messages: [{
+        id: 'wamid.location-1',
+        from: '971500',
+        timestamp: '12346',
+        type: 'location',
+        location: { latitude: 10.0159, longitude: 76.3419, name: 'Kakkanad', address: 'Kochi' },
+      }] } }] }],
+    });
+
+    expect(inbound.location).toEqual({
+      latitude: 10.0159,
+      longitude: 76.3419,
+      label: 'Kakkanad',
+      address: 'Kochi',
+      source: 'whatsapp_location',
+    });
+  });
 });

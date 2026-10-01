@@ -39,6 +39,7 @@ const dedup = require('../../router/dedup');
 const messageOrder = require('../../router/messageOrder');
 const keyedLock = require('../../reliability/keyedLock');
 const { handleInboundMessage } = require('../../router/conversationRouter');
+const analytics = require('../../analytics/eventWriter');
 
 function session(overrides = {}) {
   return {
@@ -78,6 +79,7 @@ describe('voice notes through the conversation router', () => {
     dedup.clearForTests();
     messageOrder.clearForTests();
     keyedLock.clearForTests();
+    analytics.clearTestEvents();
     db.insert.mockResolvedValue([]);
     db.patch.mockResolvedValue([]);
     crmAdapter.findCustomerByPhone.mockResolvedValue({ id: 'cust1' });
@@ -104,6 +106,8 @@ describe('voice notes through the conversation router', () => {
     expect(transcription.transcribeAudio).toHaveBeenCalledWith(expect.objectContaining({
       mimeType: 'audio/ogg', languageHint: 'en',
     }));
+    expect(analytics.getTestEvents('971500').map((event) => event.eventType))
+      .toEqual(expect.arrayContaining(['VOICE_RECEIVED', 'VOICE_TRANSCRIBED']));
   });
 
   it('uses semantic service matching for "bedroom light not working" in an active booking', async () => {
@@ -193,6 +197,8 @@ describe('voice notes through the conversation router', () => {
     expect(mediaHandler.downloadWhatsAppMedia).toHaveBeenCalledTimes(1);
     expect(transcription.transcribeAudio).toHaveBeenCalledTimes(1);
     expect(whatsapp.sendText).toHaveBeenCalledWith('971500', expect.stringContaining('try sending it again'));
+    expect(analytics.getTestEvents('971500').map((event) => event.eventType))
+      .toEqual(expect.arrayContaining(['VOICE_TRANSCRIPTION_FAILED', 'TRANSCRIPTION_ERROR']));
   });
 
   it('preserves an active flow after media download failure', async () => {
@@ -206,6 +212,8 @@ describe('voice notes through the conversation router', () => {
     expect(sessionStore.clearFlow).not.toHaveBeenCalled();
     expect(mediaHandler.downloadWhatsAppMedia).toHaveBeenCalledTimes(1);
     expect(transcription.transcribeAudio).not.toHaveBeenCalled();
+    expect(analytics.getTestEvents('971500').map((event) => event.eventType))
+      .toEqual(expect.arrayContaining(['VOICE_TRANSCRIPTION_FAILED', 'MEDIA_DOWNLOAD_ERROR']));
   });
 
   it('does not download or transcribe a duplicate voice webhook twice', async () => {

@@ -17,9 +17,10 @@ const {
   summarizeHandoff,
 } = require('../../ai/intentService');
 const { callGemini } = geminiProvider;
+const analytics = require('../../analytics/eventWriter');
 
 describe('detectIntent', () => {
-  beforeEach(() => { callGemini.mockReset(); });
+  beforeEach(() => { callGemini.mockReset(); analytics.clearTestEvents(); });
 
   it('returns a validated result for well-formed JSON', async () => {
     callGemini.mockResolvedValueOnce(JSON.stringify({
@@ -27,10 +28,10 @@ describe('detectIntent', () => {
     }));
 
     const result = await detectIntent('Nale evening AC service venam');
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       intent: 'NEW_BOOKING', service: 'AC', issue: null, locationHint: null,
       preferredDate: 'tomorrow', preferredTime: 'evening', language: 'manglish', confidence: 0.94,
-    });
+    }));
   });
 
   it('falls back to UNKNOWN on malformed JSON rather than throwing', async () => {
@@ -38,6 +39,8 @@ describe('detectIntent', () => {
     const result = await detectIntent('asdkjaslkd');
     expect(result.intent).toBe('UNKNOWN');
     expect(result.confidence).toBe(0);
+    expect(analytics.getTestEvents('unknown').map((event) => event.eventType))
+      .toContain('AI_FALLBACK_USED');
   });
 
   it('falls back to UNKNOWN when the model invents an intent outside the enum', async () => {

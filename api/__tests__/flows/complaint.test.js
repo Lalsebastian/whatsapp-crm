@@ -27,6 +27,7 @@ const intentService = require('../../ai/intentService');
 intentService.classifyComplaintCategory = vi.fn();
 
 const actionGuard = require('../../reliability/actionGuard');
+const analytics = require('../../analytics/eventWriter');
 
 const complaint = require('../../flows/complaint');
 
@@ -37,6 +38,7 @@ function resetAll() {
   escalationService.evaluateTriggers.mockReset().mockReturnValue({ escalate: false, reason: null });
   intentService.classifyComplaintCategory.mockResolvedValue({ category: null, confidence: 0 });
   actionGuard.clearForTests();
+  analytics.clearTestEvents();
 }
 
 describe('complaint flow', () => {
@@ -149,6 +151,8 @@ describe('complaint flow', () => {
       '971500',
       expect.stringContaining("I've registered your complaint with our support team")
     );
+    expect(analytics.getTestEvents('971500').map((event) => event.eventType))
+      .toEqual(expect.arrayContaining(['COMPLAINT_CREATED', 'CONVERSATION_COMPLETED']));
   });
 
   it('confirms the complaint handoff only when escalation succeeds', async () => {

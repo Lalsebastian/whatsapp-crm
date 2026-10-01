@@ -12,6 +12,7 @@ fakeCrm.getCustomerProperties = vi.fn();
 fakeCrm.addProperty = vi.fn();
 fakeCrm.getAvailability = vi.fn();
 fakeCrm.createBooking = vi.fn();
+fakeCrm.checkServiceability = vi.fn();
 
 const whatsapp = require('../../whatsapp/client');
 whatsapp.sendText = vi.fn();
@@ -30,20 +31,25 @@ const escalationService = require('../../escalation/escalationService');
 escalationService.triggerEscalation = vi.fn();
 
 const actionGuard = require('../../reliability/actionGuard');
+const analytics = require('../../analytics/eventWriter');
+const messageBudget = require('../../analytics/messageBudget');
 
 const booking = require('../../flows/booking');
 
 function resetAll() {
-  [fakeCrm.getServices, fakeCrm.getServiceDetails, fakeCrm.getCustomerProperties, fakeCrm.addProperty, fakeCrm.getAvailability, fakeCrm.createBooking,
+  [fakeCrm.getServices, fakeCrm.getServiceDetails, fakeCrm.getCustomerProperties, fakeCrm.addProperty, fakeCrm.getAvailability, fakeCrm.createBooking, fakeCrm.checkServiceability,
     whatsapp.sendText, whatsapp.sendButtons, whatsapp.sendListMessage, sessionStore.setFlow, sessionStore.clearFlow,
     intentService.matchServiceToCatalog, intentService.analyzeBookingCorrection, escalationService.triggerEscalation]
     .forEach((fn) => fn.mockReset());
   actionGuard.clearForTests();
+  analytics.clearTestEvents();
+  messageBudget.reset();
   intentService.matchServiceToCatalog.mockResolvedValue({ serviceId: null, confidence: 0 });
   intentService.analyzeBookingCorrection.mockResolvedValue({
     service: null, locationHint: null, preferredDate: null, preferredTime: null, confidence: 0,
   });
   fakeCrm.getCustomerProperties.mockResolvedValue([]);
+  fakeCrm.checkServiceability.mockResolvedValue({ serviceable: true });
 }
 
 describe('booking flow — confirm step', () => {
@@ -60,6 +66,37 @@ describe('booking flow — confirm step', () => {
     expect(fakeCrm.createBooking).toHaveBeenCalledTimes(1);
     expect(fakeCrm.createBooking).toHaveBeenCalledWith({
       customerId: 'cust1', propertyId: 'prop1', serviceId: 'svc1', date: '2026-10-01', time: '09:00',
+    });
+    expect(analytics.getTestEvents('971500').map((event) => event.eventType))
+      .toEqual(expect.arrayContaining(['BOOKING_CONFIRMED', 'BOOKING_CREATED', 'CONVERSATION_COMPLETED']));
+  });
+
+  it('records privacy-safe booking turn and fast-path completion metrics', async () => {
+    fakeCrm.createBooking.mockResolvedValue({ reference: 'BK-METRIC', scheduledDate: '2026-10-01', scheduledTime: '09:00' });
+    messageBudget.start('971500', { fieldsExtracted: ['service', 'property', 'date', 'time', 'issue'] });
+    messageBudget.botMessage('971500');
+    messageBudget.botMessage('971500');
+    messageBudget.customerMessage('971500');
+    messageBudget.avoidQuestion('971500', 3);
+    messageBudget.markFastPath('971500');
+
+    await booking.steps.confirm(
+      { phone: '971500', context: { serviceId: 'svc1', propertyId: 'prop1', date: '2026-10-01', time: '09:00' } },
+      { id: 'cust1' }, { buttonId: 'CONFIRM_BOOKING' }
+    );
+
+    const events = analytics.getTestEvents('971500');
+    expect(events.map((event) => event.eventType)).toEqual(expect.arrayContaining([
+      'BOOKING_CUSTOMER_TURNS', 'BOOKING_BOT_TURNS', 'BOOKING_MESSAGES_TO_COMPLETE',
+    ]));
+    expect(events.find((event) => event.eventType === 'BOOKING_MESSAGES_TO_COMPLETE').metadata).toMatchObject({
+      customerMessages: 2,
+      botMessages: 2,
+      totalMessages: 4,
+      fieldsExtractedFirstMessage: 5,
+      redundantQuestionsAvoided: 3,
+      withinFourBotMessages: true,
+      fastPathUsed: true,
     });
   });
 
@@ -201,7 +238,7 @@ describe('booking flow — select_service step', () => {
     await booking.steps.select_service(
       { phone: '971500', context: {}, preferredLanguage: 'en' },
       { id: 'cust1' },
-      { text: 'my washing machine makes an odd sound' }
+      { text: 'my machine makes an odd sound' }
     );
 
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
@@ -217,7 +254,7 @@ describe('booking flow — select_service step', () => {
     await booking.steps.select_service(
       { phone: '971500', context: {}, preferredLanguage: 'en' },
       { id: 'cust1' },
-      { text: 'my washing machine makes an odd sound' }
+      { text: 'my machine makes an odd sound' }
     );
 
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
@@ -236,13 +273,131 @@ describe('booking flow — select_service step', () => {
 
     await booking.steps.select_service({ phone: '971500', context: {} }, { id: 'cust1' }, { text: 'something is broken' });
 
-    expect(sessionStore.setFlow).toHaveBeenCalledWith('971500', 'booking', 'select_service', {});
+    expect(sessionStore.setFlow).toHaveBeenCalledWith(
+      '971500', 'booking', 'select_service', expect.objectContaining({ missingFields: expect.any(Array) })
+    );
     expect(whatsapp.sendListMessage).toHaveBeenCalled();
   });
 });
 
 describe('booking flow — hybrid field collection', () => {
   beforeEach(resetAll);
+
+  it('shows CRM-backed kitchen recommendations as one direct-button message', async () => {
+    fakeCrm.getServices.mockResolvedValue([
+      { id: 'clean', name: 'Kitchen Cleaning', category: 'cleaning' },
+      { id: 'plumb', name: 'Plumbing', category: 'plumbing' },
+      { id: 'electric', name: 'Electrical', category: 'electrical' },
+      { id: 'appliance', name: 'Appliance Repair', category: 'appliances' },
+      { id: 'pest', name: 'Pest Control', category: 'pest-control' },
+      { id: 'ac', name: 'AC Service', category: 'ac' },
+    ]);
+
+    await booking.startBooking(
+      { phone: '971500', context: {} },
+      { id: 'cust1' },
+      { text: 'kitchen', ai: { intent: 'NEW_BOOKING', room: 'kitchen', confidence: 0.82 } }
+    );
+
+    expect(whatsapp.sendButtons).toHaveBeenCalledTimes(1);
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
+      '971500', 'I can help with your kitchen. What do you need?',
+      [
+        { id: 'SVC_clean', title: 'Kitchen Cleaning' },
+        { id: 'SVC_plumb', title: 'Plumbing' },
+        { id: 'MORE_SERVICES', title: 'More Services' },
+      ]
+    );
+    expect(whatsapp.sendListMessage).not.toHaveBeenCalled();
+  });
+
+  it('filters kitchen recommendations by the saved location before showing them', async () => {
+    fakeCrm.getServices.mockResolvedValue([
+      { id: 'clean', name: 'Kitchen Cleaning', category: 'cleaning' },
+      { id: 'plumb', name: 'Plumbing', category: 'plumbing' },
+      { id: 'electric', name: 'Electrical', category: 'electrical' },
+    ]);
+    fakeCrm.getCustomerProperties.mockResolvedValue([
+      { id: 'home', label: 'Kakkanad home', addressLine: 'Kakkanad', area: 'Kakkanad', isDefault: true },
+    ]);
+    fakeCrm.checkServiceability.mockImplementation(async (serviceId) => ({
+      serviceable: serviceId !== 'clean', source: 'crm',
+    }));
+
+    await booking.startBooking(
+      { phone: '971500', context: {} }, { id: 'cust1' },
+      { text: 'kitchen', ai: { intent: 'NEW_BOOKING', room: 'kitchen', confidence: 0.82 } }
+    );
+
+    expect(fakeCrm.checkServiceability).toHaveBeenCalledTimes(3);
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
+      '971500', 'I can help with your kitchen. What do you need?',
+      [
+        { id: 'SVC_plumb', title: 'Plumbing' },
+        { id: 'SVC_electric', title: 'Electrical' },
+      ]
+    );
+    expect(sessionStore.setFlow).toHaveBeenCalledWith(
+      '971500', 'booking', 'select_service',
+      expect.objectContaining({
+        propertyId: 'home', serviceabilityFiltered: true,
+        recommendedServices: [{ id: 'plumb', name: 'Plumbing' }, { id: 'electric', name: 'Electrical' }],
+      })
+    );
+  });
+
+  it('asks for another address when every relevant service is unavailable, then retries recommendations', async () => {
+    const services = [
+      { id: 'clean', name: 'Kitchen Cleaning', category: 'cleaning' },
+      { id: 'plumb', name: 'Plumbing', category: 'plumbing' },
+    ];
+    fakeCrm.getServices.mockResolvedValue(services);
+    fakeCrm.getCustomerProperties.mockResolvedValue([
+      { id: 'home', label: 'Home', addressLine: 'Outside Area', area: 'Outside Area', isDefault: true },
+    ]);
+    fakeCrm.addProperty.mockResolvedValue({ id: 'alternate', addressLine: 'Dubai Marina', area: 'Dubai Marina' });
+    fakeCrm.checkServiceability.mockImplementation(async (_serviceId, location) => ({
+      serviceable: location.address === 'Dubai Marina', source: 'crm',
+    }));
+
+    await booking.startBooking(
+      { phone: '971500', context: {} }, { id: 'cust1' },
+      { text: 'kitchen', ai: { intent: 'NEW_BOOKING', room: 'kitchen', confidence: 0.82 } }
+    );
+
+    expect(whatsapp.sendButtons).not.toHaveBeenCalled();
+    expect(whatsapp.sendListMessage).not.toHaveBeenCalled();
+    expect(whatsapp.sendText).toHaveBeenCalledWith(
+      '971500', expect.stringContaining('Please send another service address')
+    );
+    expect(sessionStore.setFlow).toHaveBeenLastCalledWith(
+      '971500', 'booking', 'recommendation_location',
+      expect.objectContaining({
+        room: 'kitchen', propertyId: undefined, location: undefined,
+        recommendedServices: [], excludedServiceIds: ['clean', 'plumb'],
+      })
+    );
+
+    whatsapp.sendText.mockClear();
+    await booking.steps.recommendation_location(
+      { phone: '971500', context: { room: 'kitchen', issue: null } },
+      { id: 'cust1' },
+      { text: 'Dubai Marina' }
+    );
+
+    expect(fakeCrm.addProperty).toHaveBeenCalledWith('cust1', { addressLine: 'Dubai Marina' });
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
+      '971500', 'I can help with your kitchen. What do you need?',
+      [
+        { id: 'SVC_clean', title: 'Kitchen Cleaning' },
+        { id: 'SVC_plumb', title: 'Plumbing' },
+      ]
+    );
+    expect(sessionStore.setFlow).toHaveBeenLastCalledWith(
+      '971500', 'booking', 'select_service',
+      expect.objectContaining({ propertyId: 'alternate', serviceabilityFiltered: true })
+    );
+  });
 
   it('skips service selection when the initial message says electrician', async () => {
     fakeCrm.getServices.mockResolvedValue([{ id: 'svc-electrical', name: 'Electrical', category: 'electrical' }]);
@@ -258,9 +413,11 @@ describe('booking flow — hybrid field collection', () => {
     );
     expect(whatsapp.sendListMessage).not.toHaveBeenCalled();
     expect(whatsapp.sendButtons).not.toHaveBeenCalled();
+    expect(analytics.getTestEvents('971500').map((event) => event.eventType))
+      .toEqual(expect.arrayContaining(['BOOKING_STARTED', 'SERVICE_SELECTED']));
   });
 
-  it('prefills multiple fields and skips a matching service, address, date, and time', async () => {
+  it('prefills known fields and reuses a matching saved address without asking again', async () => {
     fakeCrm.getServices.mockResolvedValue([{ id: 'svc-plumbing', name: 'Plumbing', category: 'plumbing' }]);
     fakeCrm.getCustomerProperties.mockResolvedValue([
       { id: 'prop1', label: 'Kakkanad flat', addressLine: 'Kakkanad, Kochi', area: 'Kakkanad' },
@@ -275,11 +432,95 @@ describe('booking flow — hybrid field collection', () => {
       },
     });
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
-      '971500', 'booking', 'review_item',
+      '971500', 'booking', 'confirm',
       expect.objectContaining({
-        serviceId: 'svc-plumbing', propertyId: 'prop1', time: '17:00',
-        locationHint: 'Kakkanad flat', issue: 'Kitchen tap leaking', serviceMatchSource: 'deterministic',
+        cart: [expect.objectContaining({ serviceId: 'svc-plumbing', propertyId: 'prop1' })],
+        issue: 'Kitchen tap leaking',
       })
+    );
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
+      '971500', expect.stringContaining('Kakkanad flat'), [
+        expect.objectContaining({ id: 'CONFIRM_BOOKING' }),
+        expect.objectContaining({ id: 'CHANGE_DETAILS' }),
+        expect.objectContaining({ id: 'CANCEL_FLOW' }),
+      ]
+    );
+    expect(whatsapp.sendText).not.toHaveBeenCalled();
+    expect(whatsapp.sendListMessage).not.toHaveBeenCalled();
+    expect(sessionStore.setFlow).not.toHaveBeenCalledWith(
+      '971500', 'booking', 'select_date', expect.anything()
+    );
+  });
+
+  it('reuses a returning customer default property and asks only for the missing time', async () => {
+    fakeCrm.getServices.mockResolvedValue([{ id: 'svc-plumbing', name: 'Plumbing', category: 'plumbing' }]);
+    fakeCrm.getCustomerProperties.mockResolvedValue([
+      { id: 'prop-home', label: 'Kakkanad home', addressLine: 'Kakkanad, Kochi', area: 'Kakkanad', isDefault: true },
+    ]);
+    fakeCrm.getAvailability.mockResolvedValue(['09:00', '17:00']);
+
+    await booking.startBooking(
+      { phone: '971500', context: {} },
+      { id: 'cust1', name: 'John' },
+      { text: 'plumber tomorrow', ai: { service: 'Plumbing', preferredDate: 'tomorrow', confidence: 0.96 } }
+    );
+
+    expect(fakeCrm.checkServiceability).toHaveBeenCalledWith(
+      'svc-plumbing', expect.objectContaining({ propertyId: 'prop-home', source: 'saved_property' })
+    );
+    expect(fakeCrm.getAvailability).toHaveBeenCalledTimes(1);
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
+      '971500', expect.stringContaining('Certainly, John.'),
+      [
+        { id: 'SLOT_09:00', title: '9:00 AM' },
+        { id: 'SLOT_17:00', title: '5:00 PM' },
+      ]
+    );
+    expect(whatsapp.sendText).not.toHaveBeenCalledWith('971500', expect.stringContaining('address'));
+  });
+
+  it('uses the only available slot and goes directly to compact review', async () => {
+    fakeCrm.getServices.mockResolvedValue([{ id: 'svc-plumbing', name: 'Plumbing', category: 'plumbing' }]);
+    fakeCrm.getCustomerProperties.mockResolvedValue([
+      { id: 'home', label: 'Home', addressLine: 'Kakkanad', area: 'Kakkanad', isDefault: true },
+    ]);
+    fakeCrm.getAvailability.mockResolvedValue(['17:00']);
+
+    await booking.startBooking(
+      { phone: '971500', context: {} }, { id: 'cust1', name: 'John' },
+      { text: 'plumber tomorrow', ai: { service: 'Plumbing', preferredDate: 'tomorrow', confidence: 0.96 } }
+    );
+
+    expect(whatsapp.sendButtons).toHaveBeenCalledTimes(1);
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
+      '971500', expect.stringContaining('Please review your booking details'),
+      expect.arrayContaining([{ id: 'CONFIRM_BOOKING', title: 'Confirm Booking' }])
+    );
+    expect(sessionStore.setFlow).toHaveBeenCalledWith(
+      '971500', 'booking', 'confirm', expect.objectContaining({ cart: [expect.objectContaining({ time: '17:00' })] })
+    );
+    expect(whatsapp.sendText).not.toHaveBeenCalled();
+    expect(whatsapp.sendListMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unserviceable address before looking up slots', async () => {
+    fakeCrm.getServiceDetails.mockResolvedValue({ id: 'svc1', name: 'Plumbing' });
+    fakeCrm.getCustomerProperties.mockResolvedValue([
+      { id: 'prop1', label: 'Home', addressLine: 'Outside Area', isDefault: true },
+    ]);
+    fakeCrm.checkServiceability.mockResolvedValue({ serviceable: false });
+
+    await booking.steps.select_service(
+      { phone: '971500', context: { date: '2026-10-02' } },
+      { id: 'cust1' },
+      { buttonId: 'SVC_svc1' }
+    );
+
+    expect(fakeCrm.checkServiceability).toHaveBeenCalledTimes(1);
+    expect(fakeCrm.getAvailability).not.toHaveBeenCalled();
+    expect(whatsapp.sendText).toHaveBeenCalledWith('971500', expect.stringContaining('outside the service area'));
+    expect(sessionStore.setFlow).toHaveBeenCalledWith(
+      '971500', 'booking', 'awaiting_new_property', expect.objectContaining({ propertyId: undefined })
     );
   });
 
@@ -295,6 +536,10 @@ describe('booking flow — hybrid field collection', () => {
   });
 
   it('matches a saved property from a voice transcript', async () => {
+    fakeCrm.getCustomerProperties.mockResolvedValue([
+      { id: 'prop1', label: 'Kakkanad flat', addressLine: 'Kakkanad, Kochi', area: 'Kakkanad', city: 'Kochi' },
+      { id: 'prop2', label: 'Office', addressLine: 'Dubai', city: 'Dubai' },
+    ]);
     await booking.steps.select_property(
       {
         phone: '971500',
@@ -311,6 +556,59 @@ describe('booking flow — hybrid field collection', () => {
       '971500', 'booking', 'select_date',
       expect.objectContaining({ propertyId: 'prop1', propertyLabel: 'Kakkanad flat — Kakkanad, Kochi' })
     );
+  });
+
+  it('confirms a default property only after revalidating it against CRM', async () => {
+    const property = { id: 'prop1', label: 'Home', addressLine: 'Villa 2', area: 'Jumeirah', isDefault: true };
+    fakeCrm.getServiceDetails.mockResolvedValue({ id: 'svc1', name: 'AC Service' });
+    fakeCrm.getCustomerProperties.mockResolvedValue([property]);
+
+    await booking.steps.confirm_default_property(
+      { phone: '971500', context: { serviceId: 'svc1', serviceName: 'AC Service', suggestedPropertyId: 'prop1' } },
+      { id: 'cust1' },
+      { buttonId: 'CONFIRM_DEFAULT_PROPERTY' }
+    );
+
+    expect(fakeCrm.getCustomerProperties).toHaveBeenCalledWith('cust1');
+    expect(sessionStore.setFlow).toHaveBeenCalledWith(
+      '971500', 'booking', 'select_date', expect.objectContaining({ propertyId: 'prop1' })
+    );
+  });
+
+  it('does not use a saved property that was removed from CRM', async () => {
+    fakeCrm.getServiceDetails.mockResolvedValue({ id: 'svc1', name: 'AC Service' });
+    fakeCrm.getCustomerProperties.mockResolvedValue([]);
+
+    await booking.steps.confirm_default_property(
+      { phone: '971500', context: { serviceId: 'svc1', suggestedPropertyId: 'removed' } },
+      { id: 'cust1' },
+      { buttonId: 'CONFIRM_DEFAULT_PROPERTY' }
+    );
+
+    expect(whatsapp.sendText).toHaveBeenCalledWith('971500', expect.stringContaining('no longer available'));
+    expect(sessionStore.setFlow).toHaveBeenCalledWith('971500', 'booking', 'awaiting_new_property', expect.any(Object));
+  });
+
+  it('orders alternate saved addresses by default and then recent use', async () => {
+    const properties = [
+      { id: 'old', label: 'Old Home', addressLine: 'Old Street' },
+      { id: 'recent', label: 'Office', addressLine: 'Business Bay' },
+      { id: 'default', label: 'Home', addressLine: 'Jumeirah', isDefault: true },
+    ];
+    fakeCrm.getServiceDetails.mockResolvedValue({ id: 'svc1', name: 'AC Service' });
+    fakeCrm.getCustomerProperties.mockResolvedValue(properties);
+    const session = {
+      phone: '971500',
+      customerProfile: { recentBookings: [{ propertyId: 'recent' }] },
+      context: { serviceId: 'svc1', suggestedPropertyId: 'default' },
+    };
+
+    await booking.steps.confirm_default_property(
+      session, { id: 'cust1' }, { buttonId: 'CHOOSE_ANOTHER_PROPERTY' }
+    );
+
+    const rows = whatsapp.sendListMessage.mock.calls[0][3][0].rows;
+    expect(rows.slice(0, 3).map((row) => row.id)).toEqual(['PROP_default', 'PROP_recent', 'PROP_old']);
   });
 
   it('uses voice-extracted date and time while retaining CRM slot validation', async () => {
@@ -330,8 +628,35 @@ describe('booking flow — hybrid field collection', () => {
     );
 
     expect(sessionStore.setFlow).toHaveBeenCalledWith(
-      '971500', 'booking', 'review_item',
-      expect.objectContaining({ time: '17:00', currentItem: expect.objectContaining({ time: '17:00' }) })
+      '971500', 'booking', 'confirm',
+      expect.objectContaining({ cart: [expect.objectContaining({ time: '17:00' })] })
+    );
+  });
+
+  it('moves from slot selection directly to one compact confirmation message', async () => {
+    await booking.steps.select_slot(
+      {
+        phone: '971500',
+        context: {
+          serviceId: 'svc1', serviceName: 'Plumbing', room: 'kitchen', issue: 'Kitchen sink leak',
+          propertyId: 'prop1', propertyLabel: 'Kakkanad', date: '2026-10-02', availableSlots: ['10:00'],
+        },
+      },
+      { id: 'cust1' },
+      { buttonId: 'SLOT_10:00' }
+    );
+
+    expect(whatsapp.sendButtons).toHaveBeenCalledTimes(1);
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
+      '971500', expect.stringMatching(/Plumbing[\s\S]*Kakkanad[\s\S]*Kitchen sink leak/),
+      [
+        { id: 'CONFIRM_BOOKING', title: 'Confirm Booking' },
+        { id: 'CHANGE_DETAILS', title: 'Change Details' },
+        { id: 'CANCEL_FLOW', title: 'Cancel' },
+      ]
+    );
+    expect(sessionStore.setFlow).toHaveBeenCalledWith(
+      '971500', 'booking', 'confirm', expect.objectContaining({ cart: [expect.objectContaining({ time: '10:00' })] })
     );
   });
 

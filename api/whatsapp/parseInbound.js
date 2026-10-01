@@ -23,7 +23,7 @@ function normalizeInboundMessage(rawBody) {
   if (msg.type === 'interactive') {
     const buttonId = msg.interactive && msg.interactive.button_reply && msg.interactive.button_reply.id;
     const listId = msg.interactive && msg.interactive.list_reply && msg.interactive.list_reply.id;
-    return { ...base, buttonId: buttonId || listId || null };
+    return { ...base, buttonId: buttonId || listId || null, source: buttonId ? 'button' : 'list' };
   }
 
   if (['image', 'video', 'audio', 'document'].includes(msg.type)) {
@@ -33,6 +33,19 @@ function normalizeInboundMessage(rawBody) {
       mediaId: media && media.id,
       mediaMimeType: media && media.mime_type,
       caption: media && media.caption,
+    };
+  }
+
+  if (msg.type === 'location' && msg.location) {
+    return {
+      ...base,
+      location: {
+        latitude: Number(msg.location.latitude),
+        longitude: Number(msg.location.longitude),
+        label: msg.location.name || null,
+        address: msg.location.address || null,
+        source: 'whatsapp_location',
+      },
     };
   }
 

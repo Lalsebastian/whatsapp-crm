@@ -82,7 +82,14 @@ const CATEGORIES = [
 const CATEGORY_BY_ID = Object.fromEntries(CATEGORIES.map((category) => [category.id, category]));
 
 async function startComplaint(session, customer, input = {}) {
-  logger.log('COMPLAINT_STARTED', { phone: session.phone });
+  logger.audit('COMPLAINT_STARTED', {
+    phone: session.phone,
+    sessionId: session.phone,
+    customerId: customer && customer.id,
+    flow: FLOW,
+    source: input.source || (input.buttonId ? 'button' : 'text'),
+    result: 'started',
+  });
   let initialContext = withVoiceEvidence(
     input.source === 'voice' ? { description: input.text && input.text.trim() } : {},
     input
@@ -121,6 +128,17 @@ async function handleSelectBooking(session, customer, input) {
     return;
   }
   const bookingId = input.buttonId === 'BKC_NONE' ? null : input.buttonId.replace('BKC_', '');
+  if (bookingId) {
+    logger.audit('COMPLAINT_LINKED_TO_BOOKING', {
+      phone: session.phone,
+      sessionId: session.phone,
+      customerId: customer && customer.id,
+      flow: FLOW,
+      bookingId,
+      source: 'list',
+      result: 'linked',
+    });
+  }
   const context = { ...session.context, bookingId };
   if (context.category) return continueWithComplaintContext(session, context);
   await promptCategory(session, context);
@@ -141,6 +159,24 @@ async function startComplaintFromFeedback(session, customer, input) {
     attachments: input.attachments || [],
     feedbackId: input.feedbackId,
   };
+  return continueWithComplaintContext(session, context);
+}
+
+async function startComplaintForBooking(session, customer, input) {
+  const context = {
+    bookingId: input.bookingId,
+    category: CATEGORY_BY_ID[input.category] ? input.category : undefined,
+    description: input.description || undefined,
+    voiceNotes: input.voice ? [input.voice] : [],
+  };
+  if (input.description) {
+    const classification = await classifyComplaintCategory(input.description, {
+      preferredLanguage: session.preferredLanguage,
+    });
+    if (classification.category && classification.confidence >= AI_CONFIDENCE.MEDIUM) {
+      context.category = classification.category;
+    }
+  }
   return continueWithComplaintContext(session, context);
 }
 
@@ -178,6 +214,16 @@ async function handleSelectCategory(session, customer, input) {
     description: description || session.context.description,
     attachments: session.context.attachments || [],
   }, input);
+  logger.audit('COMPLAINT_CATEGORY_SELECTED', {
+    phone: session.phone,
+    sessionId: session.phone,
+    customerId: customer && customer.id,
+    flow: FLOW,
+    step: 'select_category',
+    category,
+    source: input.source || (input.buttonId ? 'list' : 'text'),
+    result: 'selected',
+  });
 
   const empathy = category === 'other' && description
     ? "Thank you for explaining what happened. I'll make sure the details are recorded properly."
@@ -213,6 +259,16 @@ async function handleAwaitingMedia(session, customer, input) {
     const received = attachments.length === 1 ? 'the attachment' : `${attachments.length} attachments`;
     await whatsapp.sendText(session.phone, `Thank you, I've received ${received}. You can send another one if needed, or select Skip / Done to continue.`);
     await sessionStore.setFlow(session.phone, FLOW, 'awaiting_media', { ...session.context, attachments });
+    logger.audit('COMPLAINT_MEDIA_RECEIVED', {
+      phone: session.phone,
+      sessionId: session.phone,
+      customerId: customer && customer.id,
+      flow: FLOW,
+      step: 'awaiting_media',
+      mediaType: input.mediaType,
+      attachmentCount: attachments.length,
+      result: 'received',
+    });
     return;
   }
 
@@ -237,6 +293,17 @@ async function handleAwaitingMedia(session, customer, input) {
     voiceNotes,
     feedbackId,
     submissionNonce: randomUUID(),
+  });
+  logger.audit('COMPLAINT_REVIEW_SHOWN', {
+    phone: session.phone,
+    sessionId: session.phone,
+    customerId: customer && customer.id,
+    flow: FLOW,
+    step: 'confirm',
+    bookingId,
+    category,
+    attachmentCount: attachments.length,
+    result: 'shown',
   });
 }
 
@@ -297,9 +364,20 @@ async function handleConfirm(session, customer, input) {
         sessionId: session.phone,
         result: 'success',
         complaintReference: complaint.reference,
+        complaintId: complaint.id,
+        bookingId,
+        category,
       });
     }
-    logger.log('COMPLAINT_CREATED', { phone: session.phone, reference: complaint.reference });
+    logger.audit('CONVERSATION_COMPLETED', {
+      phone: session.phone,
+      sessionId: session.phone,
+      customerId: customer.id,
+      flow: FLOW,
+      complaintId: complaint.id,
+      outcome: 'complaint_created',
+      result: 'completed',
+    });
 
     if (feedbackId && complaint.id) {
       try {
@@ -324,6 +402,8 @@ async function handleConfirm(session, customer, input) {
       sessionId: session.phone,
       result: err.uncertain ? 'uncertain' : 'failed',
       reason: err.code || err.message,
+      bookingId,
+      category,
     });
     if (err.uncertain) {
       let escalated = false;
@@ -406,6 +486,7 @@ async function handleConfirm(session, customer, input) {
 module.exports = {
   startComplaint,
   startComplaintFromFeedback,
+  startComplaintForBooking,
   steps: {
     select_booking: handleSelectBooking,
     select_category: handleSelectCategory,

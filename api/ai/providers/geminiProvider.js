@@ -115,4 +115,4 @@ async function callGeminiAudio(input) {
   }
 }
 
-module.exports = { callGemini, callGeminiAudio };
+module.exports = { callGemini, callGeminiAudio, GEMINI_MODEL };

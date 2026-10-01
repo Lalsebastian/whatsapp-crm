@@ -170,6 +170,27 @@ async function sendMessage({ message, buttonId, label }) {
     meta += '\nfollowUpRequired=' + data.followUpRequired;
     meta += '\ncomplaintLinked=' + data.complaintLinked;
     if (data.debugReason) meta += '\nwhy UNKNOWN: ' + data.debugReason;
+    meta += '\ncustomerId=' + data.customerId;
+    meta += '\nreturningCustomer=' + data.returningCustomer;
+    meta += '\npreferredLanguage=' + data.preferredLanguage;
+    meta += '\ndefaultProperty=' + data.defaultProperty;
+    meta += '\nknownFields=' + JSON.stringify(data.knownFields || []);
+    meta += '\nmissingFields=' + JSON.stringify(data.missingFields || []);
+    meta += '\nambiguousFields=' + JSON.stringify(data.ambiguousFields || []);
+    meta += '\nrequiresRevalidation=' + JSON.stringify(data.requiresRevalidation || []);
+    meta += '\nroom=' + data.room;
+    meta += '\nissue=' + data.issue;
+    meta += '\nrecommendedServices=' + JSON.stringify(data.recommendedServices || []);
+    meta += '\nserviceabilityFiltered=' + data.serviceabilityFiltered;
+    meta += '\nfastPathUsed=' + data.fastPathUsed;
+    meta += '\ncustomerTurnCount=' + data.customerTurnCount;
+    meta += '\nbotTurnCount=' + data.botTurnCount;
+    meta += '\nredundantQuestionsAvoided=' + data.redundantQuestionsAvoided;
+    meta += '\nmessageCount=' + JSON.stringify(data.messageCount || {});
+    meta += '\nprofileSource=' + data.profileSource;
+    if (data.analyticsEvents && data.analyticsEvents.length) {
+      meta += '\nevents=' + data.analyticsEvents.map(function (event) { return event.eventType; }).join(', ');
+    }
     addMessage(
       'bot',
       data.reply || (data.humanTakeover ? '(human takeover active — bot is silent)' : '(no reply)'),

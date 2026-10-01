@@ -10,6 +10,7 @@ const testChannel = require('./testChannel');
 const reliability = require('../config/reliability');
 const { retry, isTransientError } = require('../reliability/asyncPolicy');
 const { CircuitBreaker } = require('../reliability/circuitBreaker');
+const messageBudget = require('../analytics/messageBudget');
 
 const GRAPH_BASE = 'https://graph.facebook.com/v19.0';
 const breaker = new CircuitBreaker('WhatsApp', {
@@ -30,6 +31,7 @@ function authHeaders() {
 // token, a wrong phone number ID, and a malformed payload all look
 // identical without this. Meta's actual error body says which one it is.
 async function post(payload) {
+  const startedAt = Date.now();
   try {
     breaker.assertAvailable();
     const response = await retry(
@@ -55,6 +57,12 @@ async function post(payload) {
       throw malformed;
     }
     breaker.recordSuccess();
+    logger.audit('WHATSAPP_SEND_COMPLETED', {
+      phone: payload.to,
+      source: payload.type,
+      latencyMs: Date.now() - startedAt,
+      result: 'success',
+    });
     return response;
   } catch (err) {
     breaker.recordFailure();
@@ -64,6 +72,14 @@ async function post(payload) {
       `status=${err.response ? err.response.status : 'no response'}`,
       'body=', err.response ? JSON.stringify(err.response.data) : err.message
     );
+    logger.audit('WHATSAPP_SEND_ERROR', {
+      phone: payload.to,
+      source: payload.type,
+      latencyMs: Date.now() - startedAt,
+      errorCategory: err.code || 'WHATSAPP_PROVIDER_ERROR',
+      statusCode: err.response && err.response.status,
+      result: 'failed',
+    });
     throw err;
   }
 }
@@ -78,18 +94,30 @@ async function logOutbound(to, type, content) {
   }
 }
 
+function recordBotMessage(to, messageType) {
+  logger.audit('BOT_MESSAGE_SENT', { phone: to, messageType, result: 'sent' });
+  messageBudget.botMessage(to);
+}
+
 async function sendText(to, body) {
-  if (testChannel.capture({ type: 'text', to, body })) return null; // /api/chat/test — never hits Meta
+  if (testChannel.capture({ type: 'text', to, body })) {
+    recordBotMessage(to, 'text');
+    return null; // /api/chat/test — never hits Meta
+  }
 
   logger.log('SEND TEXT', `to=${to}`, body.slice(0, 80));
   const res = await post({ messaging_product: 'whatsapp', to, type: 'text', text: { body } });
   await logOutbound(to, 'text', body);
+  recordBotMessage(to, 'text');
   return res;
 }
 
 // buttons: [{ id, title }] — WhatsApp allows a max of 3 reply buttons.
 async function sendButtons(to, bodyText, buttons) {
-  if (testChannel.capture({ type: 'buttons', to, body: bodyText, options: buttons })) return null;
+  if (testChannel.capture({ type: 'buttons', to, body: bodyText, options: buttons })) {
+    recordBotMessage(to, 'buttons');
+    return null;
+  }
 
   logger.log('SEND BUTTONS', `to=${to}`, buttons.map((b) => b.id).join(', '));
   const res = await post({
@@ -105,6 +133,7 @@ async function sendButtons(to, bodyText, buttons) {
     },
   });
   await logOutbound(to, 'button', bodyText);
+  recordBotMessage(to, 'buttons');
   return res;
 }
 
@@ -114,7 +143,10 @@ async function sendButtons(to, bodyText, buttons) {
 // limits (max 10 rows total, 24-char row title, 72-char description).
 async function sendListMessage(to, bodyText, buttonText, sections) {
   const options = sections.flatMap((s) => s.rows);
-  if (testChannel.capture({ type: 'list', to, body: bodyText, options })) return null;
+  if (testChannel.capture({ type: 'list', to, body: bodyText, options })) {
+    recordBotMessage(to, 'list');
+    return null;
+  }
 
   logger.log('SEND LIST', `to=${to}`, `sections=${sections.length}`);
   const res = await post({
@@ -138,6 +170,7 @@ async function sendListMessage(to, bodyText, buttonText, sections) {
     },
   });
   await logOutbound(to, 'list', bodyText);
+  recordBotMessage(to, 'list');
   return res;
 }
 

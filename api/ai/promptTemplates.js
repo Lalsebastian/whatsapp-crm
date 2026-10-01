@@ -32,18 +32,24 @@ Return ONLY a single JSON object (no markdown fences, no prose, no explanation) 
 {
   "intent": one of [${INTENTS.map((i) => `"${i}"`).join(', ')}],
   "service": string or null,
+  "room": string or null,
   "issue": string or null,
+  "propertyHint": string or null,
   "locationHint": string or null,
   "preferredDate": string or null,
   "preferredTime": string or null,
+  "bookingReference": string or null,
+  "complaintReference": string or null,
+  "urgency": one of ["normal", "urgent"],
   "language": one of [${LANGUAGES.map((l) => `"${l}"`).join(', ')}],
   "confidence": number between 0 and 1
 }
 
 Rules:
 - The customer may write in English, Malayalam, Manglish (Malayalam written in Latin letters), Hindi, Hinglish, or a mix of these — understand all of them.
-- Never invent a service name, date, time, price, booking ID, or complaint ID that wasn't actually in the message. Leave a field null if it's unclear.
-- Extract a short issue description and location hint only when the customer explicitly provides them.
+- Never invent a service name, date, time, price, booking reference, complaint reference, address, or location that wasn't actually in the message. Leave a field null if it's unclear.
+- A room or household area such as kitchen or bathroom is not itself a service.
+- Extract every explicitly supplied booking field in the same response, including room, issue, property/location, date, time, and references.
 - Greetings, small talk, or anything unrelated to booking/complaints should be GENERAL_QUERY.
 - Any explicit request for a human, agent, or representative is HUMAN_AGENT.
 - A request to rate, review, or give feedback about a completed service is FEEDBACK.

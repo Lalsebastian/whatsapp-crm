@@ -52,6 +52,7 @@ describe('supabaseCrmAdapter', () => {
 
     const customer = await crm.findCustomerByPhone('971500');
     expect(customer.id).toBe('cust1');
+    expect(customer.returningCustomer).toBe(false);
     expect(db.upsert).toHaveBeenCalledWith('customers', { phone: '971500' }, { onConflict: 'phone' });
   });
 
@@ -59,7 +60,29 @@ describe('supabaseCrmAdapter', () => {
     db.get.mockResolvedValueOnce([{ id: 'cust1', phone: '971500', name: 'Test' }]);
     const customer = await crm.findCustomerByPhone('971500');
     expect(customer.id).toBe('cust1');
+    expect(customer.returningCustomer).toBe(true);
     expect(db.upsert).not.toHaveBeenCalled();
+  });
+
+  it('updates a validated default property without modifying another customer property', async () => {
+    db.get
+      .mockResolvedValueOnce([{ id: 'prop1' }])
+      .mockResolvedValueOnce([{ id: 'cust1', preferred_language: 'en' }])
+      .mockResolvedValueOnce([{ id: 'prop1', customer_id: 'cust1', is_default: true }]);
+    db.patch.mockResolvedValue([]);
+
+    const result = await crm.updateCustomerPreferences('cust1', { defaultPropertyId: 'prop1' });
+
+    expect(db.patch).toHaveBeenNthCalledWith(1, 'properties', expect.stringContaining('id=eq.prop1'), { is_default: true });
+    expect(db.patch).toHaveBeenNthCalledWith(2, 'properties', expect.stringContaining('id=neq.prop1'), { is_default: false });
+    expect(result.defaultPropertyId).toBe('prop1');
+  });
+
+  it('rejects a default property that is not owned by the customer', async () => {
+    db.get.mockResolvedValueOnce([]);
+    await expect(crm.updateCustomerPreferences('cust1', { defaultPropertyId: 'other' }))
+      .rejects.toMatchObject({ code: 'INVALID_DEFAULT_PROPERTY' });
+    expect(db.patch).not.toHaveBeenCalled();
   });
 
   it('getAvailability excludes already-booked slots for that service/date', async () => {

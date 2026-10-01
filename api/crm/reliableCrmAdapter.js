@@ -6,14 +6,17 @@ const { CircuitBreaker } = require('../reliability/circuitBreaker');
 const READ_METHODS = new Set([
   'findCustomerByPhone',
   'getCustomerProperties',
+  'getCustomerPreferences',
   'getServices',
   'getServiceDetails',
+  'checkServiceability',
   'getAvailability',
   'getBookings',
   'getBookingStatus',
   'getBookingById',
   'getComplaintStatus',
   'getOpenComplaintForBooking',
+  'getActiveComplaints',
   'getFeedbackForBooking',
 ]);
 
@@ -26,6 +29,7 @@ const WRITE_METHODS = new Set([
   'escalateToHuman',
   'createFeedback',
   'markFeedbackFollowUp',
+  'updateCustomerPreferences',
 ]);
 
 function wrapCrmAdapter(adapter, options = {}) {
@@ -40,7 +44,7 @@ function wrapCrmAdapter(adapter, options = {}) {
   const wrapped = {};
   for (const method of [...READ_METHODS, ...WRITE_METHODS]) {
     wrapped[method] = async (...args) => {
-      breaker.assertAvailable();
+      const startedAt = Date.now();
       const isRead = READ_METHODS.has(method);
       const call = () => withTimeout(
         () => adapter[method](...args),
@@ -50,6 +54,7 @@ function wrapCrmAdapter(adapter, options = {}) {
       );
 
       try {
+        breaker.assertAvailable();
         const value = isRead
           ? await retry(call, {
             retries: maxReadRetries,
@@ -61,12 +66,24 @@ function wrapCrmAdapter(adapter, options = {}) {
           })
           : await call();
         breaker.recordSuccess();
+        logger.audit(isRead ? 'CRM_READ_COMPLETED' : 'CRM_WRITE_COMPLETED', {
+          operation: method,
+          latencyMs: Date.now() - startedAt,
+          result: 'success',
+        });
         return value;
       } catch (error) {
         if (!isRead && (error.code === 'OPERATION_TIMEOUT' || isTransientError(error))) {
           error.uncertain = true;
         }
         if (error.code === 'OPERATION_TIMEOUT' || isTransientError(error)) breaker.recordFailure();
+        logger.audit(isRead ? 'CRM_READ_ERROR' : 'CRM_WRITE_ERROR', {
+          operation: method,
+          latencyMs: Date.now() - startedAt,
+          errorCategory: error.code || 'CRM_PROVIDER_ERROR',
+          statusCode: error.response && error.response.status,
+          result: error.uncertain ? 'uncertain' : 'failed',
+        });
         throw error;
       }
     };

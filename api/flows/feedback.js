@@ -89,6 +89,7 @@ async function promptRating(session, customer, booking, service, initialComment)
     customerId: customer.id,
     bookingId: booking.id,
     bookingReference: booking.reference,
+    serviceId: booking.serviceId,
     result: 'success',
   });
   return { started: true, booking };
@@ -188,12 +189,18 @@ async function handleSelectRating(session, customer, input) {
     phone: session.phone,
     customerId: customer.id,
     bookingId: session.context.booking && session.context.booking.id,
+    serviceId: session.context.booking && session.context.booking.serviceId,
     rating,
     source: input.source || (input.buttonId ? 'button' : 'text'),
     result: 'success',
   });
   if (rating <= 3) {
-    logger.audit('FEEDBACK_LOW_RATING', { phone: session.phone, customerId: customer.id, rating, result: 'received' });
+    logger.audit('FEEDBACK_LOW_RATING', {
+      phone: session.phone, customerId: customer.id,
+      bookingId: session.context.booking && session.context.booking.id,
+      serviceId: session.context.booking && session.context.booking.serviceId,
+      rating, followUpRequired: true, result: 'received',
+    });
     await whatsapp.sendButtons(
       session.phone,
       "I'm sorry the service didn't fully meet your expectations. Could you tell me what went wrong? I'll make sure the feedback is recorded properly.",
@@ -274,7 +281,14 @@ async function finalizeFeedback(session, customer, suppliedComment) {
   }
 
   logger.audit('FEEDBACK_COMPLETED', {
-    phone: session.phone, customerId: customer.id, bookingId: booking.id, feedbackId: feedback.id, rating, result: 'success',
+    phone: session.phone, customerId: customer.id, bookingId: booking.id,
+    serviceId: booking.serviceId, feedbackId: feedback.id, rating,
+    followUpRequired: rating <= 3, result: 'success',
+  });
+  logger.audit('CONVERSATION_COMPLETED', {
+    phone: session.phone, sessionId: session.phone, customerId: customer.id,
+    flow: FLOW, bookingId: booking.id, feedbackId: feedback.id,
+    outcome: 'feedback_completed', result: 'completed',
   });
 
   if (rating <= 3) return handleLowRating(session, customer, { feedback, booking, service, rating, comment, media });

@@ -11,17 +11,23 @@ const {
   INTENTS,
   COMPLAINT_CATEGORIES,
 } = require('./promptTemplates');
-const { callGemini } = require('./providers/geminiProvider');
+const { callGemini, GEMINI_MODEL } = require('./providers/geminiProvider');
 const logger = require('../utils/logger');
 
 const UNKNOWN_RESULT = Object.freeze({
   intent: 'UNKNOWN',
   service: null,
+  serviceId: null,
+  room: null,
   issue: null,
+  propertyHint: null,
   locationHint: null,
   preferredDate: null,
   preferredTime: null,
+  bookingReference: null,
+  complaintReference: null,
   language: 'en',
+  urgency: 'normal',
   confidence: 0,
 });
 
@@ -49,22 +55,62 @@ function validate(parsed) {
   return {
     intent: parsed.intent,
     service: parsed.service || null,
+    serviceId: null,
+    room: parsed.room || null,
     issue: parsed.issue || null,
+    propertyHint: parsed.propertyHint || parsed.locationHint || null,
     locationHint: parsed.locationHint || null,
     preferredDate: parsed.preferredDate || null,
     preferredTime: parsed.preferredTime || null,
+    bookingReference: parsed.bookingReference || null,
+    complaintReference: parsed.complaintReference || null,
     language: parsed.language || 'en',
+    urgency: parsed.urgency === 'urgent' ? 'urgent' : 'normal',
     confidence,
   };
+}
+
+async function callTracked(taskType, prompt) {
+  const startedAt = Date.now();
+  logger.audit('AI_INTENT_REQUESTED', {
+    provider: 'gemini',
+    model: GEMINI_MODEL,
+    taskType,
+    result: 'requested',
+  });
+  try {
+    const raw = await callGemini(prompt);
+    logger.audit('AI_INTENT_RESOLVED', {
+      provider: 'gemini',
+      model: GEMINI_MODEL,
+      taskType,
+      latencyMs: Date.now() - startedAt,
+      result: 'success',
+    });
+    return raw;
+  } catch (error) {
+    const timeout = ['OPERATION_TIMEOUT', 'ECONNABORTED', 'ETIMEDOUT'].includes(error.code);
+    logger.audit(timeout ? 'AI_TIMEOUT' : 'AI_ERROR', {
+      provider: 'gemini',
+      model: GEMINI_MODEL,
+      taskType,
+      latencyMs: Date.now() - startedAt,
+      errorCategory: timeout ? 'AI_PROVIDER_TIMEOUT' : 'AI_PROVIDER_ERROR',
+      statusCode: error.response && error.response.status,
+      result: 'failed',
+    });
+    throw error;
+  }
 }
 
 async function detectIntent(text, context = {}) {
   try {
     const prompt = buildIntentPrompt(text, context);
-    const raw = await callGemini(prompt);
+    const raw = await callTracked('intent_detection', prompt);
     const parsed = safeParseJson(raw);
     const validated = validate(parsed);
     if (!validated) {
+      logger.audit('AI_FALLBACK_USED', { taskType: 'intent_detection', reason: 'invalid_response', result: 'fallback' });
       logger.warn('AI', 'Unparseable/invalid intent response — falling back to UNKNOWN:', raw);
       // debugReason is extra, dev-only diagnostic info — surfaced by
       // /api/chat/test, never sent to a real WhatsApp customer.
@@ -81,7 +127,7 @@ async function detectIntent(text, context = {}) {
 async function classifyComplaintCategory(text, context = {}) {
   try {
     const prompt = buildComplaintCategoryPrompt(text, context);
-    const raw = await callGemini(prompt);
+    const raw = await callTracked('complaint_classification', prompt);
     const parsed = safeParseJson(raw);
     if (!parsed || typeof parsed !== 'object' || !COMPLAINT_CATEGORIES.includes(parsed.category)) {
       logger.warn('AI', 'Unparseable/invalid complaint category response — falling back to category selection:', raw);
@@ -106,7 +152,7 @@ async function matchServiceToCatalog(text, services, context = {}) {
 
   try {
     const prompt = buildServiceMatchPrompt(text, services, context);
-    const raw = await callGemini(prompt);
+    const raw = await callTracked('service_match', prompt);
     const parsed = safeParseJson(raw);
     const validIds = new Set(services.map((service) => String(service.id)));
     if (!parsed || typeof parsed !== 'object' || !validIds.has(String(parsed.serviceId))) {
@@ -129,7 +175,7 @@ async function analyzeBookingCorrection(text, context = {}) {
   if (!text) return UNKNOWN_BOOKING_CORRECTION;
   try {
     const prompt = buildBookingCorrectionPrompt(text, context);
-    const raw = await callGemini(prompt);
+    const raw = await callTracked('booking_correction', prompt);
     const parsed = safeParseJson(raw);
     if (!parsed || typeof parsed !== 'object') {
       logger.warn('AI', 'Invalid booking correction response:', raw);
@@ -155,7 +201,7 @@ async function analyzeBookingCorrection(text, context = {}) {
 
 async function summarizeHandoff(handoff) {
   try {
-    const raw = await callGemini(buildHandoffSummaryPrompt(handoff));
+    const raw = await callTracked('handoff_summary', buildHandoffSummaryPrompt(handoff));
     const parsed = safeParseJson(raw);
     if (!parsed || typeof parsed.summary !== 'string' || !parsed.summary.trim()) return null;
     return parsed.summary.trim().slice(0, 1000);

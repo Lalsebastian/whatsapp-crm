@@ -6,6 +6,7 @@ const sessionStore = require('../../session/sessionStore');
 sessionStore.setHumanTakeover = vi.fn();
 const intentService = require('../../ai/intentService');
 intentService.summarizeHandoff = vi.fn();
+const analytics = require('../../analytics/eventWriter');
 
 const {
   evaluateTriggers,
@@ -20,6 +21,7 @@ beforeEach(() => {
   db.get.mockReset().mockResolvedValue([]);
   sessionStore.setHumanTakeover.mockReset().mockResolvedValue({});
   intentService.summarizeHandoff.mockReset().mockResolvedValue(null);
+  analytics.clearTestEvents();
 });
 
 describe('evaluateTriggers', () => {
@@ -161,6 +163,8 @@ describe('evaluateTriggers', () => {
     }));
     expect(sessionStore.setHumanTakeover).toHaveBeenCalledWith('971500', true);
     expect(result.priority).toBe('HIGH');
+    expect(analytics.getTestEvents('971500').map((event) => event.eventType))
+      .toEqual(expect.arrayContaining(['HANDOFF_REQUESTED', 'HANDOFF_CREATED', 'HUMAN_TAKEOVER_STARTED']));
   });
 
   it('does not set takeover when CRM handoff creation fails', async () => {

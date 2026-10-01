@@ -47,15 +47,27 @@ router.get('/', requireAnalyticsAccess, async (req, res) => {
       code: 'CHATBOT_ANALYTICS_INVALID_RANGE',
     });
   }
+  logger.log('CHATBOT_ANALYTICS', `request range=${range}`);
   try {
     const analytics = await dashboardService.getChatbotAnalytics(range);
     res.set('Cache-Control', 'private, no-store');
     return res.json(analytics);
   } catch (error) {
-    logger.error('CHATBOT_ANALYTICS', 'Unable to aggregate analytics:', error.code || error.message);
-    return res.status(500).json({
-      error: 'Unable to load chatbot analytics.',
-      code: 'CHATBOT_ANALYTICS_FAILED',
+    const dependencyFailure = error.isDependencyError || error.statusCode === 503;
+    logger.error(
+      'CHATBOT_ANALYTICS',
+      `request failed range=${range}`,
+      `stage=${error.stage || 'unknown'}`,
+      `type=${dependencyFailure ? 'dependency' : 'internal'}`,
+      `code=${error.code || 'CHATBOT_ANALYTICS_FAILED'}`
+    );
+    return res.status(dependencyFailure ? 503 : 500).json({
+      error: dependencyFailure
+        ? 'Chatbot analytics is temporarily unavailable.'
+        : 'Unable to load chatbot analytics.',
+      code: dependencyFailure
+        ? 'CHATBOT_ANALYTICS_UNAVAILABLE'
+        : 'CHATBOT_ANALYTICS_FAILED',
     });
   }
 });

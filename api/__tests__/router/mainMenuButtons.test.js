@@ -15,6 +15,9 @@ db.insert = vi.fn();
 
 const crmAdapter = require('../../crm/supabaseCrmAdapter');
 crmAdapter.findCustomerByPhone = vi.fn();
+crmAdapter.getCustomerProperties = vi.fn();
+crmAdapter.getBookings = vi.fn();
+crmAdapter.getActiveComplaints = vi.fn();
 
 const intentService = require('../../ai/intentService');
 intentService.detectIntent = vi.fn();
@@ -28,6 +31,9 @@ const dedup = require('../../router/dedup');
 const messageOrder = require('../../router/messageOrder');
 const keyedLock = require('../../reliability/keyedLock');
 const { handleInboundMessage } = require('../../router/conversationRouter');
+const analytics = require('../../analytics/eventWriter');
+const lifecycle = require('../../analytics/conversationLifecycle');
+const profiles = require('../../customer/customerProfileService');
 
 function idleSession() {
   return {
@@ -57,6 +63,9 @@ describe('three-button main menu', () => {
     whatsapp.sendListMessage.mockReset();
     db.insert.mockReset().mockResolvedValue([]);
     crmAdapter.findCustomerByPhone.mockReset().mockResolvedValue({ id: 'cust1' });
+    crmAdapter.getCustomerProperties.mockReset().mockResolvedValue([]);
+    crmAdapter.getBookings.mockReset().mockResolvedValue([]);
+    crmAdapter.getActiveComplaints.mockReset().mockResolvedValue([]);
     intentService.detectIntent.mockReset();
     for (const key of ['BOOK_SERVICE', 'MY_BOOKINGS', 'MAKE_COMPLAINT', 'COMPLAINT_STATUS', 'SERVICE_INFO', 'HUMAN_SUPPORT']) {
       flowRegistry.entryPoints[key].mockReset();
@@ -64,6 +73,9 @@ describe('three-button main menu', () => {
     dedup.clearForTests();
     messageOrder.clearForTests();
     keyedLock.clearForTests();
+    analytics.clearTestEvents();
+    lifecycle.clearForTests();
+    profiles.clearForTests();
   });
 
   it.each(['Hi', 'Hello', 'Hey', 'Menu', 'Start'])('shows three direct buttons for %s', async (greeting) => {
@@ -79,6 +91,13 @@ describe('three-button main menu', () => {
       ]
     );
     expect(whatsapp.sendListMessage).not.toHaveBeenCalled();
+  });
+
+  it('records returning-customer identification without exposing it in the WhatsApp message', async () => {
+    crmAdapter.findCustomerByPhone.mockResolvedValue({ id: 'cust1', name: 'John', returningCustomer: true });
+    await send({ text: 'Hi', id: 'returning-greeting' });
+    expect(analytics.getTestEvents('971500').map((event) => event.eventType))
+      .toEqual(expect.arrayContaining(['CUSTOMER_IDENTIFIED', 'RETURNING_CUSTOMER_IDENTIFIED']));
   });
 
   it.each([
