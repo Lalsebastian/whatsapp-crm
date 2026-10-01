@@ -72,7 +72,7 @@ export const queryKeys = {
  */
 
 const BOOKING_COLUMNS =
-  '*, service:services(id, name, category), customer:customers(id, name, phone)';
+  '*, service:services(id, name, category, duration_minutes), customer:customers(id, name, phone), property:properties(id, label, address_line, area, city)';
 
 export async function listBookings(filters = {}) {
   const { orderBy = 'scheduled_date', ascending = false, ...where } = filters;
@@ -135,6 +135,10 @@ export async function getComplaint(id) {
 
 export async function updateComplaint(id, patch) {
   return updateRow('complaints', patch, { id });
+}
+
+export async function createComplaintRecord(values) {
+  return insertRow('complaints', values);
 }
 
 export async function updateComplaintStatuses(ids, patch) {
@@ -232,7 +236,72 @@ export async function listServices({ activeOnly = true } = {}) {
   return rows ?? [];
 }
 
+export async function createService(values) {
+  return insertRow('services', values);
+}
+
+export async function updateService(id, patch) {
+  return updateRow('services', patch, { id });
+}
+
+export async function listSlaPolicies() {
+  return (await fetchRows('crm_sla_policies', { order: { column: 'entity_type', ascending: true } })) ?? [];
+}
+
+export async function updateSlaPolicy(id, patch) {
+  return updateRow('crm_sla_policies', { ...patch, updated_at: new Date().toISOString() }, { id });
+}
+
+export async function listOperationalTargets() {
+  return (await fetchRows('crm_operational_targets', { order: { column: 'metric', ascending: true } })) ?? [];
+}
+
+export async function updateOperationalTarget(id, patch) {
+  return updateRow('crm_operational_targets', { ...patch, updated_at: new Date().toISOString() }, { id });
+}
+
+export async function listAutomationSettings() {
+  return (await fetchRows('crm_automation_settings', { order: { column: 'key', ascending: true } })) ?? [];
+}
+
+export async function updateAutomationSetting(id, patch) {
+  return updateRow('crm_automation_settings', { ...patch, updated_at: new Date().toISOString() }, { id });
+}
+
 export async function listCustomers() {
   const rows = await fetchRows('customers', { order: { column: 'name', ascending: true } });
   return rows ?? [];
+}
+
+export async function updateCustomer(id, patch) {
+  return updateRow('customers', patch, { id });
+}
+
+export async function listActivityLog(entityType, entityId) {
+  try {
+    const rows = await fetchRows('crm_activity_log', {
+      filters: { entity_type: entityType, entity_id: entityId },
+      order: { column: 'created_at', ascending: false },
+      limit: 50,
+    });
+    return { available: true, rows: rows ?? [] };
+  } catch (error) {
+    if (/crm_activity_log|relation .* does not exist|permission denied/i.test(error.message)) {
+      return { available: false, rows: [] };
+    }
+    throw error;
+  }
+}
+
+export async function listAllActivityLog(limit = 250) {
+  try {
+    const rows = await fetchRows('crm_activity_log', {
+      order: { column: 'created_at', ascending: false },
+      limit,
+    });
+    return { available: true, rows: rows ?? [] };
+  } catch (error) {
+    if (/crm_activity_log|relation .* does not exist|permission denied/i.test(error.message)) return { available: false, rows: [] };
+    throw error;
+  }
 }

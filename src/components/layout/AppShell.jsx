@@ -3,10 +3,13 @@ import { Outlet } from 'react-router-dom';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Topbar } from '@/components/layout/Topbar';
 import { MobileNavDrawer, MobileNavProvider } from '@/components/layout/MobileNav';
+import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { useTheme } from '@/hooks/useTheme';
+import { useMotionPreference } from '@/hooks/useMotionPreference';
 
 function ShellChrome() {
   const { resolvedTheme } = useTheme();
+  useMotionPreference();
   const canvasRef = useRef(null);
 
   // useLayoutEffect rather than a plain effect so the class is applied before
@@ -36,6 +39,7 @@ function ShellChrome() {
         <div className="aurora-mesh absolute inset-0" />
         <div className="dashboard-grid absolute inset-0" />
         <div className="surreal-particles absolute inset-0" />
+        <div className="surreal-constellation absolute inset-0"><i /><i /><i /><i /><i /><i /></div>
         <div className="cursor-spotlight absolute inset-0" />
         <div className="surreal-scene absolute inset-0">
           <div className="surreal-sun"><span /></div>
@@ -43,6 +47,8 @@ function ShellChrome() {
           <div className="surreal-monolith" />
           <div className="surreal-ribbon" />
           <div className="surreal-portal"><i /><i /></div>
+          <div className="surreal-prism"><i /></div>
+          <div className="surreal-wave"><i /><i /><i /></div>
         </div>
       </div>
       <Sidebar className="hidden lg:flex" />
@@ -50,10 +56,11 @@ function ShellChrome() {
 
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
         <Topbar />
-        <main className="min-w-0 flex-1">
+        <main className="min-w-0 flex-1 pb-20 lg:pb-0">
           <Outlet />
         </main>
       </div>
+      <MobileBottomNav />
     </div>
   );
 }

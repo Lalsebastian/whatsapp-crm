@@ -1,4 +1,4 @@
-import { CalendarClock, CircleDot, FileText } from 'lucide-react';
+import { CalendarClock, ChevronLeft, ChevronRight, CircleDot, FileText } from 'lucide-react';
 import {
   Sheet,
   SheetContent,
@@ -6,8 +6,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
+import { AuditTrail } from '@/components/data/AuditTrail';
 
-export function RecordDrawer({ record, title, description, fields = [], timeline = [], onClose }) {
+export function RecordDrawer({ record, title, description, fields = [], timeline = [], actions, summary, navigation, activityEntity, onClose }) {
   return (
     <Sheet open={Boolean(record)} onOpenChange={(open) => !open && onClose?.()}>
       <SheetContent className="record-drawer w-full overflow-y-auto p-0 sm:max-w-xl">
@@ -20,9 +22,21 @@ export function RecordDrawer({ record, title, description, fields = [], timeline
             <SheetTitle className="text-xl tracking-tight">{title}</SheetTitle>
             <SheetDescription>{description}</SheetDescription>
           </SheetHeader>
+          {navigation ? (
+            <div className="relative mt-5 flex items-center justify-between border-t border-primary/10 pt-3">
+              <span className="text-muted-foreground text-[11px] font-medium">{navigation.label}</span>
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="icon-sm" onClick={navigation.onPrevious} disabled={!navigation.hasPrevious} aria-label="Previous record"><ChevronLeft /></Button>
+                <Button variant="outline" size="icon-sm" onClick={navigation.onNext} disabled={!navigation.hasNext} aria-label="Next record"><ChevronRight /></Button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
+        {actions ? <div className="border-b border-border/70 bg-muted/20 px-6 py-4">{actions}</div> : null}
+
         <div className="space-y-7 p-6">
+          {summary}
           <section>
             <div className="mb-3 flex items-center gap-2 text-xs font-semibold">
               <FileText className="size-4 text-info dark:text-primary" /> Details
@@ -59,6 +73,7 @@ export function RecordDrawer({ record, title, description, fields = [], timeline
               </ol>
             </section>
           ) : null}
+          {record && activityEntity ? <AuditTrail entityType={activityEntity} entityId={record.id} /> : null}
         </div>
       </SheetContent>
     </Sheet>

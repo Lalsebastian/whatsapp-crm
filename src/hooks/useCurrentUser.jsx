@@ -19,7 +19,7 @@ export { ROLE_META, ROLES } from '@/lib/roles';
 const STORAGE_KEY = 'crm-console-role';
 
 const PERMISSIONS = {
-  owner: ['analytics:view', 'bookings:view', 'complaints:view', 'escalations:view', 'jobs:view'],
+  owner: ['analytics:view', 'bookings:view', 'bookings:write', 'complaints:view', 'complaints:write', 'escalations:view', 'escalations:write', 'jobs:view', 'jobs:assign'],
   agent: ['bookings:view', 'bookings:write', 'complaints:view', 'complaints:write', 'escalations:view', 'escalations:write', 'jobs:view', 'jobs:assign'],
   tech: ['jobs:view', 'jobs:update', 'media:upload'],
 };

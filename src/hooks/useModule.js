@@ -16,6 +16,7 @@ export function useModule(defaultModule) {
 
   return {
     active: requested ?? defaultModule,
-    setModule: (moduleId) => setSearchParams({ view: moduleId }, { replace: true }),
+    setModule: (moduleId, params = {}) =>
+      setSearchParams({ view: moduleId, ...params }, { replace: true }),
   };
 }

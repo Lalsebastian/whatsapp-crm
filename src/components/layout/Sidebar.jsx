@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, useNavigate, useSearchParams } from 'react-router-dom';
-import { Bot, ChevronDown, Moon, PanelLeftClose, PanelLeftOpen, ShieldAlert, Sun, UserRoundCog } from 'lucide-react';
+import { Bot, ChevronDown, Moon, PanelLeftClose, PanelLeftOpen, ShieldAlert, Sparkles, Sun, UserRoundCog } from 'lucide-react';
 import joboyLogo from '@/assets/joboy-logo.png';
 import { cn } from '@/lib/utils';
 import { ROLE_META, useCurrentUser } from '@/hooks/useCurrentUser';
@@ -11,11 +11,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { roleHome } from '@/lib/roles';
+import { useMotionPreference } from '@/hooks/useMotionPreference';
 
 const SIDEBAR_STORAGE_KEY = 'crm-sidebar-collapsed';
 
 function Brand({ collapsed }) {
-  return <div className={cn('flex min-h-[5.25rem] items-center py-3', collapsed ? 'justify-center px-2' : 'px-5')}>
+  return <div className={cn('sidebar-brand flex min-h-[5.25rem] items-center py-3', collapsed ? 'justify-center px-2' : 'px-5')}>
     <img
       src={joboyLogo}
       alt="Joboy"
@@ -93,6 +94,21 @@ function ThemeRow({ collapsed }) {
   </div>;
 }
 
+function MotionRow({ collapsed }) {
+  const { motion, setMotion } = useMotionPreference();
+  const labels = { full: 'Cinematic', gentle: 'Gentle', still: 'Still' };
+  return <div className={cn('border-sidebar-border flex items-center border-t py-3', collapsed ? 'justify-center px-3' : 'justify-between px-5')}>
+    {!collapsed ? <span className="text-sidebar-foreground/80 text-[12px]">Motion</span> : null}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild><Button variant="ghost" size={collapsed ? 'icon' : 'sm'} title={`Motion: ${labels[motion]}`}><Sparkles className="size-4" />{!collapsed ? labels[motion] : null}</Button></DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuLabel>Animation intensity</DropdownMenuLabel>
+        {Object.entries(labels).map(([value, label]) => <DropdownMenuItem key={value} onSelect={() => setMotion(value)} className={motion === value ? 'bg-muted font-semibold' : ''}>{label}</DropdownMenuItem>)}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  </div>;
+}
+
 export function Sidebar({ className }) {
   const { role } = useCurrentUser();
   const [searchParams] = useSearchParams();
@@ -104,7 +120,7 @@ export function Sidebar({ className }) {
     return next;
   });
 
-  return <aside className={cn('bg-sidebar/94 text-sidebar-foreground border-sidebar-border relative sticky top-0 z-20 h-dvh shrink-0 flex-col border-r shadow-[12px_0_40px_rgba(15,23,42,.045)] backdrop-blur-2xl transition-[width] duration-300 ease-out', collapsed ? 'w-[5.25rem]' : 'w-[17rem]', className)}>
+  return <aside className={cn('joboy-sidebar bg-sidebar/94 text-sidebar-foreground border-sidebar-border relative sticky top-0 z-20 h-dvh shrink-0 flex-col border-r shadow-[12px_0_40px_rgba(15,23,42,.045)] backdrop-blur-2xl transition-[width] duration-300 ease-out', collapsed ? 'w-[5.25rem]' : 'w-[17rem]', className)}>
     <Button variant="outline" size="icon-sm" onClick={toggleCollapsed} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!collapsed} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} className="bg-card absolute top-7 -right-4 z-30 rounded-full shadow-md">
       {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
     </Button>
@@ -117,6 +133,7 @@ export function Sidebar({ className }) {
         {!collapsed ? <><Bot className="size-3.5" /><span className="font-medium">WhatsApp connected</span></> : null}
       </div>
     </div>
+    <MotionRow collapsed={collapsed} />
     <ThemeRow collapsed={collapsed} />
   </aside>;
 }

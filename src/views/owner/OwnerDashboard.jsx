@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import {
   Activity,
   AlertTriangle,
@@ -18,7 +19,15 @@ import {
   Wrench,
 } from 'lucide-react';
 import { getOverview, getServiceMix } from '@/lib/api/analytics';
-import { listBookings, listComplaints, listEscalations, queryKeys } from '@/lib/api';
+import {
+  listBookings,
+  listComplaints,
+  listEscalations,
+  queryKeys,
+  updateBooking,
+  updateComplaint,
+  updateEscalation,
+} from '@/lib/api';
 import { useLiveUpdates } from '@/hooks/useRealtime';
 import {
   formatCompactCurrency,
@@ -29,7 +38,7 @@ import {
   formatPercent,
   formatPhone,
 } from '@/lib/utils';
-import { BOOKING_STATUS, complaintStatus } from '@/lib/status';
+import { BOOKING_STATUS, COMPLAINT_STATUS, complaintStatus } from '@/lib/status';
 import { ChartPanel, ViewShell } from '@/components/layout/ViewShell';
 import { useModule } from '@/hooks/useModule';
 import { KpiCard, KpiGrid } from '@/components/data/KpiCard';
@@ -38,9 +47,19 @@ import { FilterBar, RangePicker } from '@/components/data/FilterBar';
 import { ErrorState, PanelSkeleton } from '@/components/data/EmptyState';
 import { DataTable } from '@/components/data/DataTable';
 import { RecordDrawer } from '@/components/data/RecordDrawer';
+import { OpenRecordButton, RecordActionBar, StatusSelect } from '@/components/data/RecordActions';
 import { SavedViews } from '@/components/data/SavedViews';
+import { DashboardCustomizer } from '@/components/data/DashboardCustomizer';
+import { BookingWorkflow } from '@/components/data/BookingWorkflow';
+import { TableViewControls } from '@/components/data/TableViewControls';
+import { SlaBadge } from '@/components/data/SlaBadge';
+import { useDashboardWidgets } from '@/hooks/useDashboardWidgets';
+import { useTableView } from '@/hooks/useTableView';
 import { MixChart, RevenueChart, VolumeChart } from '@/components/charts/Charts';
 import { UtilizationChart } from '@/components/charts/TrendCharts';
+import { OwnerCalendar, OwnerCustomers, TodayCommandCentre } from '@/views/owner/OwnerExperienceViews';
+import { OwnerAuditLog, OwnerDispatch, OwnerReports } from '@/views/owner/OwnerOperationsViews';
+import { OwnerControlCentre } from '@/views/owner/OwnerControlCentre';
 import { Button } from '@/components/ui/button';
 import { Panel, PanelBody, PanelHeader, PanelTitle } from '@/components/layout/Panel';
 
@@ -54,6 +73,7 @@ import { Panel, PanelBody, PanelHeader, PanelTitle } from '@/components/layout/P
 export function OwnerDashboard() {
   const { active, setModule } = useModule('overview');
   const [range, setRange] = useState('30d');
+  const dashboard = useDashboardWidgets();
 
   // Bookings and complaints feed the tiles and the charts, so a status change
   // anywhere in the app has to land here without a reload.
@@ -62,12 +82,22 @@ export function OwnerDashboard() {
   const overview = useQuery({
     queryKey: queryKeys.analytics.overview(range),
     queryFn: () => getOverview({ range }),
+    enabled: ['overview', 'bookings', 'complaints'].includes(active),
   });
 
   const mix = useQuery({
     queryKey: ['analytics', 'mix', range],
     queryFn: () => getServiceMix({ range }),
+    enabled: active === 'overview',
   });
+
+  if (active === 'calendar') return <OwnerCalendar />;
+  if (active === 'customers') return <OwnerCustomers />;
+  if (active === 'reports') return <OwnerReports />;
+  if (active === 'dispatch') return <OwnerDispatch />;
+  if (active === 'audit') return <OwnerAuditLog />;
+  if (active === 'control') return <OwnerControlCentre />;
+  if (active === 'escalations') return <OwnerEscalations />;
 
   if (overview.isError) {
     return (
@@ -97,13 +127,17 @@ export function OwnerDashboard() {
 
   if (active === 'bookings') return <OwnerBookings overview={overview.data} />;
   if (active === 'complaints') return <OwnerComplaints overview={overview.data} />;
-  if (active === 'escalations') return <OwnerEscalations />;
 
   return (
     <ViewShell
       title="Executive overview"
       description="Performance, priorities and customer operations in one command centre"
-      actions={<RangePicker value={range} onChange={setRange} />}
+      actions={
+        <>
+          <DashboardCustomizer widgets={dashboard.widgets} onToggle={dashboard.toggle} onReset={dashboard.reset} />
+          <RangePicker value={range} onChange={setRange} />
+        </>
+      }
     >
       {overview.data.warnings?.length ? (
         <div className="bg-warning/10 text-warning ring-warning/25 rounded-lg px-3 py-2 text-xs ring-1 ring-inset">
@@ -118,12 +152,15 @@ export function OwnerDashboard() {
         onNavigate={setModule}
       />
 
-      <SectionHeading
-        eyebrow="Performance pulse"
-        title="The numbers that move the business"
-        description="Every metric is calculated from the selected reporting period."
-      />
-      <KpiGrid>
+      {dashboard.widgets.today ? <TodayCommandCentre onNavigate={setModule} /> : null}
+
+      {dashboard.widgets.performance ? <>
+        <SectionHeading
+          eyebrow="Performance pulse"
+          title="The numbers that move the business"
+          description="Every metric is calculated from the selected reporting period."
+        />
+        <KpiGrid>
         <KpiCard
           label="Revenue"
           value={formatCompactCurrency(kpis.revenue)}
@@ -176,15 +213,18 @@ export function OwnerDashboard() {
               : `${kpis.csatResponses} responses · ${kpis.csatPending} awaiting reply`
           }
         />
-      </KpiGrid>
+        </KpiGrid>
+      </> : null}
 
-      <SectionHeading
-        eyebrow="Decision intelligence"
-        title="See momentum and pressure points"
-        description="Use the operational pulse to move directly into the records behind each signal."
-      />
+      {dashboard.widgets.revenue || dashboard.widgets.operations ? (
+        <SectionHeading
+          eyebrow="Decision intelligence"
+          title="See momentum and pressure points"
+          description="Use the operational pulse to move directly into the records behind each signal."
+        />
+      ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-12">
+      {dashboard.widgets.revenue ? <div className="grid gap-4 xl:grid-cols-12">
         <ChartPanel
           title="Revenue over time"
           description="Completed jobs, by scheduled date"
@@ -199,9 +239,9 @@ export function OwnerDashboard() {
           onNavigate={setModule}
           className="xl:col-span-4"
         />
-      </div>
+      </div> : null}
 
-      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+      {dashboard.widgets.operations ? <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <ChartPanel title="Customer journey" description="Distinct customers at each step">
           <FunnelList funnel={series.funnel} />
         </ChartPanel>
@@ -210,6 +250,7 @@ export function OwnerDashboard() {
           <VolumeChart
             data={series.bookingsByStatus}
             colors={series.bookingsByStatus.map((s) => STATUS_BAR_COLOR[s.label] ?? undefined)}
+            onItemClick={(item) => setModule('bookings', { status: item.label })}
           />
         </ChartPanel>
 
@@ -231,9 +272,9 @@ export function OwnerDashboard() {
         >
           <UtilizationChart data={utilisation.technicians} />
         </ChartPanel>
-      </div>
+      </div> : null}
 
-      <div className="grid gap-4 xl:grid-cols-12">
+      {dashboard.widgets.customerCare ? <div className="grid gap-4 xl:grid-cols-12">
         <ChartPanel
           title="Complaint categories"
           description="What customers are actually complaining about"
@@ -258,7 +299,7 @@ export function OwnerDashboard() {
         >
           <RecentBookings limit={6} compact />
         </ChartPanel>
-      </div>
+      </div> : null}
     </ViewShell>
   );
 }
@@ -490,6 +531,12 @@ const STATUS_BAR_COLOR = {
   rescheduled: 'var(--primary)',
 };
 
+const ESCALATION_STATUS = {
+  open: { label: 'Open', tone: 'warning' },
+  acknowledged: { label: 'Acknowledged', tone: 'info' },
+  resolved: { label: 'Resolved', tone: 'success' },
+};
+
 /**
  * Funnel as a list rather than a chart: the interesting number is the drop
  * between consecutive steps, and stacked bars make that harder to read than
@@ -602,7 +649,7 @@ function OwnerBookings({ overview }) {
   const { series, daily } = overview;
 
   return (
-    <ViewShell title="Bookings" description="Read-only view of the booking pipeline">
+    <ViewShell title="Bookings" description="Monitor and manage the booking pipeline">
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartPanel title="Bookings by status">
           <VolumeChart
@@ -621,18 +668,27 @@ function OwnerBookings({ overview }) {
 }
 
 function OwnerBookingRecords() {
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('all');
+  const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
+  const [status, setStatus] = useState(() => searchParams.get('status') ?? 'all');
   const [detail, setDetail] = useState(null);
   const bookings = useQuery({
     queryKey: ['bookings', 'owner-records'],
     queryFn: () => listBookings({}),
   });
-
-  if (bookings.isError) return <ErrorState error={bookings.error} onRetry={bookings.refetch} />;
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status: nextStatus }) => updateBooking(id, { status: nextStatus }),
+    onSuccess: (updated, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.bookings.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
+      setDetail((current) => current?.id === variables.id ? { ...current, ...(updated ?? {}), status: variables.status } : current);
+    },
+  });
 
   const rows = (bookings.data ?? []).filter((booking) => {
-    if (status !== 'all' && booking.status !== status) return false;
+    if (status === 'active' && !['pending', 'confirmed', 'in_progress', 'rescheduled'].includes(booking.status)) return false;
+    if (status !== 'all' && status !== 'active' && booking.status !== status) return false;
     if (!search) return true;
     const needle = search.toLowerCase();
     return [booking.reference, booking.service?.name, booking.customer?.name, booking.customer?.phone]
@@ -640,13 +696,17 @@ function OwnerBookingRecords() {
   });
 
   const columns = [
-    { key: 'reference', header: 'Reference', cell: (row) => <span className="tabular font-medium">{row.reference}</span> },
+    { key: 'reference', header: 'Reference', required: true, cell: (row) => <span className="tabular font-medium">{row.reference}</span> },
     { key: 'service', header: 'Service', sortValue: (row) => row.service?.name, cell: (row) => row.service?.name ?? '—' },
     { key: 'customer', header: 'Customer', sortValue: (row) => row.customer?.name ?? row.customer?.phone, cell: (row) => row.customer?.name ?? formatPhone(row.customer?.phone) },
     { key: 'scheduled_date', header: 'Scheduled', cell: (row) => <span className="text-xs">{formatDate(row.scheduled_date)} {row.scheduled_time?.slice(0, 5) ?? ''}</span> },
     { key: 'price', header: 'Value', sortValue: (row) => Number(row.price) || 0, cell: (row) => <span className="tabular">{formatCurrency(row.price)}</span> },
-    { key: 'status', header: 'Status', cell: (row) => <StatusBadge tone={BOOKING_STATUS[row.status]?.tone ?? 'neutral'}>{BOOKING_STATUS[row.status]?.label ?? humanise(row.status)}</StatusBadge> },
+    { key: 'status', header: 'Status', required: true, sortValue: (row) => row.status, cell: (row) => <StatusSelect compact value={row.status} options={BOOKING_STATUS} disabled={statusMutation.isPending && statusMutation.variables?.id === row.id} ariaLabel={`Change status for ${row.reference}`} onChange={(nextStatus) => statusMutation.mutate({ id: row.id, status: nextStatus })} /> },
+    { key: 'actions', header: 'Actions', required: true, sortable: false, cell: (row) => <OpenRecordButton onClick={() => setDetail(row)} /> },
   ];
+  const tableView = useTableView('joboy.table.owner.bookings', columns);
+
+  if (bookings.isError) return <ErrorState error={bookings.error} onRetry={bookings.refetch} />;
 
   return (
     <>
@@ -663,6 +723,7 @@ function OwnerBookingRecords() {
           aria-label="Filter bookings by status"
         >
           <option value="all">All statuses</option>
+          <option value="active">All active</option>
           {Object.entries(BOOKING_STATUS).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
         </select>
       </FilterBar>
@@ -682,14 +743,16 @@ function OwnerBookingRecords() {
             <PanelTitle>Booking records</PanelTitle>
             <div className="text-muted-foreground text-xs">{rows.length} of {(bookings.data ?? []).length} records</div>
           </div>
+          <TableViewControls columns={columns} density={tableView.density} hidden={tableView.hidden} onDensityChange={tableView.setDensity} onToggleColumn={tableView.toggleColumn} onReset={tableView.reset} />
         </PanelHeader>
         <PanelBody scroll={false}>
           <DataTable
-            columns={columns}
+            columns={tableView.visibleColumns}
             rows={rows}
             loading={bookings.isLoading}
             onRowClick={setDetail}
             pageSize={15}
+            density={tableView.density}
             emptyTitle="No bookings found"
             hasFilters={Boolean(search) || status !== 'all'}
             onClearFilters={() => { setSearch(''); setStatus('all'); }}
@@ -698,9 +761,24 @@ function OwnerBookingRecords() {
       </Panel>
       <RecordDrawer
         record={detail}
+        activityEntity="booking"
         title={detail?.reference ?? 'Booking details'}
         description="Complete booking and customer information"
         onClose={() => setDetail(null)}
+        navigation={recordNavigation(rows, detail, setDetail)}
+        summary={detail ? <BookingWorkflow status={detail.status} /> : null}
+        actions={detail ? (
+          <RecordActionBar label="Booking actions" error={statusMutation.error?.message} success={statusMutation.isSuccess && statusMutation.variables?.id === detail.id ? 'Booking status updated' : null}>
+            <StatusSelect
+              value={detail.status}
+              options={BOOKING_STATUS}
+              disabled={statusMutation.isPending && statusMutation.variables?.id === detail.id}
+              ariaLabel={`Change status for ${detail.reference}`}
+              onChange={(nextStatus) => statusMutation.mutate({ id: detail.id, status: nextStatus })}
+            />
+            {detail.customer?.phone ? <Button asChild variant="outline" size="sm"><a href={`tel:${detail.customer.phone}`}>Call customer</a></Button> : null}
+          </RecordActionBar>
+        ) : null}
         fields={detail ? [
           ['Service', detail.service?.name],
           ['Customer', detail.customer?.name],
@@ -787,15 +865,23 @@ function OwnerComplaints({ overview }) {
 }
 
 function OwnerComplaintRecords() {
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('all');
+  const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
+  const [status, setStatus] = useState(() => searchParams.get('status') ?? 'all');
   const [detail, setDetail] = useState(null);
   const complaints = useQuery({
     queryKey: ['complaints', 'owner-records'],
     queryFn: () => listComplaints({}),
   });
-
-  if (complaints.isError) return <ErrorState error={complaints.error} onRetry={complaints.refetch} />;
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status: nextStatus }) => updateComplaint(id, { status: nextStatus }),
+    onSuccess: (updated, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.complaints.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
+      setDetail((current) => current?.id === variables.id ? { ...current, ...(updated ?? {}), status: variables.status } : current);
+    },
+  });
 
   const rows = (complaints.data ?? []).filter((complaint) => {
     if (status !== 'all' && complaint.status !== status) return false;
@@ -806,15 +892,29 @@ function OwnerComplaintRecords() {
   });
 
   const columns = [
-    { key: 'reference', header: 'Reference', cell: (row) => <span className="tabular font-medium">{row.reference}</span> },
+    { key: 'reference', header: 'Reference', required: true, cell: (row) => <span className="tabular font-medium">{row.reference}</span> },
     { key: 'category', header: 'Category', cell: (row) => humanise(row.category) },
     { key: 'customer', header: 'Customer', sortValue: (row) => row.customer?.name ?? row.customer?.phone, cell: (row) => row.customer?.name ?? formatPhone(row.customer?.phone) },
     { key: 'created_at', header: 'Created', cell: (row) => <span className="text-xs">{formatDate(row.created_at)}</span> },
-    { key: 'status', header: 'Status', cell: (row) => { const meta = complaintStatus(row.status); return <StatusBadge tone={meta.tone}>{meta.label}</StatusBadge>; } },
+    { key: 'age', header: 'Age', sortValue: (row) => complaintAgeDays(row), cell: (row) => { const days = complaintAgeDays(row); const closed = ['resolved', 'closed'].includes(row.status); return <StatusBadge tone={closed ? 'success' : days >= 3 ? 'destructive' : days >= 1 ? 'warning' : 'info'}>{closed ? 'Closed' : days === 0 ? 'Today' : `${days}d open`}</StatusBadge>; } },
+    { key: 'sla', header: 'SLA', cell: (row) => <SlaBadge record={row} entityType="complaint" /> },
+    { key: 'status', header: 'Status', required: true, sortValue: (row) => row.status, cell: (row) => <StatusSelect compact value={row.status} options={COMPLAINT_STATUS} disabled={statusMutation.isPending && statusMutation.variables?.id === row.id} ariaLabel={`Change status for ${row.reference}`} onChange={(nextStatus) => statusMutation.mutate({ id: row.id, status: nextStatus })} /> },
+    { key: 'actions', header: 'Actions', required: true, sortable: false, cell: (row) => <OpenRecordButton onClick={() => setDetail(row)} /> },
   ];
+  const tableView = useTableView('joboy.table.owner.complaints', columns);
+
+  if (complaints.isError) return <ErrorState error={complaints.error} onRetry={complaints.refetch} />;
+
+  const activeCases = (complaints.data ?? []).filter((item) => !['resolved', 'closed'].includes(item.status));
+  const agingCases = activeCases.filter((item) => complaintAgeDays(item) >= 3).length;
 
   return (
     <>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <QueueMetric label="Open workload" value={activeCases.length} tone={activeCases.length ? 'warning' : 'success'} />
+        <QueueMetric label="3+ days open" value={agingCases} tone={agingCases ? 'warning' : 'success'} />
+        <QueueMetric label="Resolved / closed" value={(complaints.data ?? []).length - activeCases.length} tone="success" />
+      </div>
       <FilterBar
         search={search}
         onSearchChange={setSearch}
@@ -849,14 +949,16 @@ function OwnerComplaintRecords() {
             <PanelTitle>Complaint records</PanelTitle>
             <div className="text-muted-foreground text-xs">{rows.length} of {(complaints.data ?? []).length} records</div>
           </div>
+          <TableViewControls columns={columns} density={tableView.density} hidden={tableView.hidden} onDensityChange={tableView.setDensity} onToggleColumn={tableView.toggleColumn} onReset={tableView.reset} />
         </PanelHeader>
         <PanelBody scroll={false}>
           <DataTable
-            columns={columns}
+            columns={tableView.visibleColumns}
             rows={rows}
             loading={complaints.isLoading}
             onRowClick={setDetail}
             pageSize={15}
+            density={tableView.density}
             emptyTitle="No complaints found"
             hasFilters={Boolean(search) || status !== 'all'}
             onClearFilters={() => { setSearch(''); setStatus('all'); }}
@@ -865,9 +967,23 @@ function OwnerComplaintRecords() {
       </Panel>
       <RecordDrawer
         record={detail}
+        activityEntity="complaint"
         title={detail?.reference ?? 'Complaint details'}
         description="Customer complaint and linked booking information"
         onClose={() => setDetail(null)}
+        navigation={recordNavigation(rows, detail, setDetail)}
+        actions={detail ? (
+          <RecordActionBar label="Complaint actions" error={statusMutation.error?.message} success={statusMutation.isSuccess && statusMutation.variables?.id === detail.id ? 'Complaint status updated' : null}>
+            <StatusSelect
+              value={detail.status}
+              options={COMPLAINT_STATUS}
+              disabled={statusMutation.isPending && statusMutation.variables?.id === detail.id}
+              ariaLabel={`Change status for ${detail.reference}`}
+              onChange={(nextStatus) => statusMutation.mutate({ id: detail.id, status: nextStatus })}
+            />
+            {detail.customer?.phone ? <Button asChild variant="outline" size="sm"><a href={`tel:${detail.customer.phone}`}>Call customer</a></Button> : null}
+          </RecordActionBar>
+        ) : null}
         fields={detail ? [
           ['Category', humanise(detail.category)],
           ['Status', complaintStatus(detail.status).label],
@@ -886,16 +1002,35 @@ function OwnerComplaintRecords() {
   );
 }
 
+function complaintAgeDays(complaint) {
+  const start = new Date(complaint.created_at).getTime();
+  const end = ['resolved', 'closed'].includes(complaint.status) && complaint.updated_at
+    ? new Date(complaint.updated_at).getTime()
+    : Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  return Math.max(0, Math.floor((end - start) / 864e5));
+}
+
 function OwnerEscalations() {
+  const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('all');
+  const [status, setStatus] = useState(() => searchParams.get('status') ?? 'all');
   const [detail, setDetail] = useState(null);
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['escalations', 'owner'],
     queryFn: () => listEscalations({}),
   });
-
-  if (error) return <ErrorState error={error} onRetry={refetch} />;
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status: nextStatus }) => updateEscalation(id, {
+      status: nextStatus,
+      resolved_at: nextStatus === 'resolved' ? new Date().toISOString() : null,
+    }),
+    onSuccess: (updated, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.escalations.all });
+      setDetail((current) => current?.id === variables.id ? { ...current, ...(updated ?? {}), status: variables.status } : current);
+    },
+  });
 
   const rows = (data ?? []).filter((escalation) => {
     if (status !== 'all' && escalation.status !== status) return false;
@@ -906,12 +1041,17 @@ function OwnerEscalations() {
   });
 
   const columns = [
-    { key: 'customer', header: 'Customer', sortValue: (row) => row.customer?.name ?? row.phone, cell: (row) => row.customer?.name ?? formatPhone(row.phone) },
+    { key: 'customer', header: 'Customer', required: true, sortValue: (row) => row.customer?.name ?? row.phone, cell: (row) => row.customer?.name ?? formatPhone(row.phone) },
     { key: 'phone', header: 'Phone', cell: (row) => <span className="tabular text-xs">{formatPhone(row.phone)}</span> },
     { key: 'reason', header: 'Reason', cell: (row) => <span className="line-clamp-1 max-w-md">{row.reason ?? '—'}</span> },
     { key: 'created_at', header: 'Created', cell: (row) => <span className="text-xs">{formatDateTime(row.created_at)}</span> },
-    { key: 'status', header: 'Status', cell: (row) => <StatusBadge tone={row.status === 'resolved' ? 'success' : row.status === 'acknowledged' ? 'info' : 'warning'}>{humanise(row.status)}</StatusBadge> },
+    { key: 'sla', header: 'SLA', cell: (row) => <SlaBadge record={row} entityType="escalation" /> },
+    { key: 'status', header: 'Status', required: true, sortValue: (row) => row.status, cell: (row) => <StatusSelect compact value={row.status} options={ESCALATION_STATUS} disabled={statusMutation.isPending && statusMutation.variables?.id === row.id} ariaLabel={`Change escalation status for ${row.customer?.name ?? row.phone}`} onChange={(nextStatus) => statusMutation.mutate({ id: row.id, status: nextStatus })} /> },
+    { key: 'actions', header: 'Actions', required: true, sortable: false, cell: (row) => <OpenRecordButton onClick={() => setDetail(row)} /> },
   ];
+  const tableView = useTableView('joboy.table.owner.escalations', columns);
+
+  if (error) return <ErrorState error={error} onRetry={refetch} />;
 
   const openCount = (data ?? []).filter((row) => row.status !== 'resolved').length;
 
@@ -956,14 +1096,16 @@ function OwnerEscalations() {
             <PanelTitle>Escalation queue</PanelTitle>
             <div className="text-muted-foreground text-xs">{rows.length} of {(data ?? []).length} records</div>
           </div>
+          <TableViewControls columns={columns} density={tableView.density} hidden={tableView.hidden} onDensityChange={tableView.setDensity} onToggleColumn={tableView.toggleColumn} onReset={tableView.reset} />
         </PanelHeader>
         <PanelBody scroll={false}>
           <DataTable
-            columns={columns}
+            columns={tableView.visibleColumns}
             rows={rows}
             loading={isLoading}
             onRowClick={setDetail}
             pageSize={15}
+            density={tableView.density}
             emptyTitle="No escalations found"
             hasFilters={Boolean(search) || status !== 'all'}
             onClearFilters={() => { setSearch(''); setStatus('all'); }}
@@ -972,9 +1114,23 @@ function OwnerEscalations() {
       </Panel>
       <RecordDrawer
         record={detail}
+        activityEntity="escalation"
         title={detail?.customer?.name ?? formatPhone(detail?.phone)}
         description="Escalation context and current handling status"
         onClose={() => setDetail(null)}
+        navigation={recordNavigation(rows, detail, setDetail)}
+        actions={detail ? (
+          <RecordActionBar label="Escalation actions" error={statusMutation.error?.message} success={statusMutation.isSuccess && statusMutation.variables?.id === detail.id ? 'Escalation status updated' : null}>
+            <StatusSelect
+              value={detail.status}
+              options={ESCALATION_STATUS}
+              disabled={statusMutation.isPending && statusMutation.variables?.id === detail.id}
+              ariaLabel={`Change escalation status for ${detail.customer?.name ?? detail.phone}`}
+              onChange={(nextStatus) => statusMutation.mutate({ id: detail.id, status: nextStatus })}
+            />
+            {detail.phone ? <Button asChild variant="outline" size="sm"><a href={`tel:${detail.phone}`}>Call customer</a></Button> : null}
+          </RecordActionBar>
+        ) : null}
         fields={detail ? [
           ['Phone', formatPhone(detail.phone)],
           ['Status', humanise(detail.status)],
@@ -1005,4 +1161,17 @@ function QueueMetric({ label, value, tone = 'info' }) {
       <div className="tabular mt-1 text-2xl font-semibold">{formatNumber(value)}</div>
     </div>
   );
+}
+
+function recordNavigation(rows, detail, setDetail) {
+  if (!detail || rows.length < 2) return null;
+  const index = rows.findIndex((row) => row.id === detail.id);
+  if (index < 0) return null;
+  return {
+    label: `${index + 1} of ${rows.length}`,
+    hasPrevious: index > 0,
+    hasNext: index < rows.length - 1,
+    onPrevious: () => index > 0 && setDetail(rows[index - 1]),
+    onNext: () => index < rows.length - 1 && setDetail(rows[index + 1]),
+  };
 }

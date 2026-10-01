@@ -16,6 +16,14 @@ export async function listTechnicians({ activeOnly = true } = {}) {
   return rows ?? [];
 }
 
+export async function createTechnician(values) {
+  return insertRow('technicians', values);
+}
+
+export async function updateTechnician(id, patch) {
+  return updateRow('technicians', patch, { id });
+}
+
 /**
  * Jobs assigned to one technician. `start`/`end` are inclusive ISO dates; the
  * schedule view passes a range and "My Jobs" passes today.

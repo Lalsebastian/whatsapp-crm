@@ -22,7 +22,7 @@ import {
   formatPhone,
   formatRelative,
 } from '@/lib/utils';
-import { COMPLAINT_STATUSES, complaintStatus } from '@/lib/status';
+import { BOOKING_STATUS, COMPLAINT_STATUSES, complaintStatus } from '@/lib/status';
 import { downloadCsv, stamp } from '@/lib/csv';
 import { ViewShell } from '@/components/layout/ViewShell';
 import { Panel, PanelBody, PanelHeader, PanelTitle } from '@/components/layout/Panel';
@@ -33,6 +33,10 @@ import { ErrorState, PanelSkeleton } from '@/components/data/EmptyState';
 import { KanbanBoard } from '@/components/data/KanbanBoard';
 import { DataTable } from '@/components/data/DataTable';
 import { RecordDrawer } from '@/components/data/RecordDrawer';
+import { StatusSelect } from '@/components/data/RecordActions';
+import { BookingWorkflow } from '@/components/data/BookingWorkflow';
+import { TableViewControls } from '@/components/data/TableViewControls';
+import { useTableView } from '@/hooks/useTableView';
 import { Button } from '@/components/ui/button';
 import { MessageSquareOff, MessagesSquare } from 'lucide-react';
 
@@ -227,6 +231,7 @@ function ComplaintDetail({ complaint, onOpenChange }) {
   return (
     <RecordDrawer
       record={complaint}
+      activityEntity="complaint"
       title={complaint?.reference ?? 'Complaint details'}
       description="Complaint details and current workflow state."
       onClose={() => onOpenChange(false)}
@@ -246,13 +251,16 @@ function ComplaintDetail({ complaint, onOpenChange }) {
   );
 }
 
-function BookingDetail({ booking, onOpenChange }) {
+function BookingDetail({ booking, onOpenChange, navigation }) {
   return (
     <RecordDrawer
       record={booking}
+      activityEntity="booking"
       title={booking?.reference ?? 'Booking details'}
       description="Booking schedule, customer and service details."
       onClose={() => onOpenChange(false)}
+      navigation={navigation}
+      summary={booking ? <BookingWorkflow status={booking.status} /> : null}
       fields={booking ? [
         ['Service', booking.service?.name],
         ['Status', BOOKING_STATUS_OPTIONS[booking.status] ?? booking.status],
@@ -538,14 +546,6 @@ function AgentBookings() {
     },
   });
 
-  if (bookings.isError) {
-    return (
-      <ViewShell title="Bookings">
-        <ErrorState error={bookings.error} onRetry={bookings.refetch} />
-      </ViewShell>
-    );
-  }
-
   const rows = (bookings.data ?? []).filter((b) => {
     if (!search) return true;
     const needle = search.toLowerCase();
@@ -568,7 +568,7 @@ function AgentBookings() {
   );
 
   const columns = [
-    { key: 'reference', header: 'Reference', cell: (booking) => <span className="tabular text-xs">{booking.reference}</span> },
+    { key: 'reference', header: 'Reference', required: true, cell: (booking) => <span className="tabular text-xs">{booking.reference}</span> },
     { key: 'service', header: 'Service', sortValue: (booking) => booking.service?.name, cell: (booking) => booking.service?.name ?? '—' },
     { key: 'customer', header: 'Customer', sortValue: (booking) => booking.customer?.name ?? booking.customer?.phone, cell: (booking) => booking.customer?.name ?? formatPhone(booking.customer?.phone) },
     { key: 'scheduled_date', header: 'Scheduled', cell: (booking) => <span className="text-xs">{formatDate(booking.scheduled_date)}</span> },
@@ -592,22 +592,22 @@ function AgentBookings() {
     {
       key: 'status',
       header: 'Status',
-      cell: (booking) => (
-        <select
-          value={booking.status}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(event) => single.mutate({ id: booking.id, patch: { status: event.target.value } })}
-          className="bg-background rounded border px-1.5 py-1 text-xs"
-          aria-label={`Change status for ${booking.reference}`}
-        >
-          {Object.entries(BOOKING_STATUS_OPTIONS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        </select>
-      ),
+      required: true,
+      cell: (booking) => <StatusSelect compact value={booking.status} options={BOOKING_STATUS} disabled={single.isPending && single.variables?.id === booking.id} ariaLabel={`Change status for ${booking.reference}`} onChange={(status) => single.mutate({ id: booking.id, patch: { status } })} />,
     },
     ...(supportsBookingPriority
       ? [{ key: 'priority', header: 'Priority', cell: (booking) => <Tag>{booking.priority ?? 'normal'}</Tag> }]
       : []),
   ];
+  const tableView = useTableView('joboy.table.agent.bookings', columns);
+
+  if (bookings.isError) {
+    return (
+      <ViewShell title="Bookings">
+        <ErrorState error={bookings.error} onRetry={bookings.refetch} />
+      </ViewShell>
+    );
+  }
 
   return (
     <ViewShell title="Bookings" description="Assign technicians and change status in bulk.">
@@ -627,15 +627,17 @@ function AgentBookings() {
       <Panel className="min-h-[24rem]">
         <PanelHeader>
           <PanelTitle>{rows.length} bookings</PanelTitle>
+          <TableViewControls columns={columns} density={tableView.density} hidden={tableView.hidden} onDensityChange={tableView.setDensity} onToggleColumn={tableView.toggleColumn} onReset={tableView.reset} />
         </PanelHeader>
         <PanelBody scroll={false}>
           <DataTable
-            columns={columns}
+            columns={tableView.visibleColumns}
             rows={rows}
             loading={bookings.isLoading}
             selectedIds={selectedIds}
             onSelectionChange={setSelectedIds}
             onRowClick={setDetail}
+            density={tableView.density}
             emptyTitle="No bookings found"
             hasFilters={Boolean(search)}
             onClearFilters={() => setSearch('')}
@@ -716,7 +718,7 @@ function AgentBookings() {
         </Button>
       </BulkActionBar>
 
-      <BookingDetail booking={detail} onOpenChange={(open) => !open && setDetail(null)} />
+      <BookingDetail booking={detail} onOpenChange={(open) => !open && setDetail(null)} navigation={recordNavigation(rows, detail, setDetail)} />
     </ViewShell>
   );
 }
@@ -742,8 +744,11 @@ function AgentEscalations() {
     queryFn: () => listEscalations({}),
   });
 
-  const resolve = useMutation({
-    mutationFn: ({ id }) => updateEscalation(id, { status: 'resolved', resolved_at: new Date().toISOString() }),
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }) => updateEscalation(id, {
+      status,
+      resolved_at: status === 'resolved' ? new Date().toISOString() : null,
+    }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['escalations'] }),
   });
 
@@ -777,18 +782,15 @@ function AgentEscalations() {
                       </div>
                     ) : null}
                   </div>
-                  <StatusBadge tone={esc.status === 'resolved' ? 'success' : 'warning'}>
-                    {esc.status}
-                  </StatusBadge>
-                  {esc.status !== 'resolved' ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => resolve.mutate({ id: esc.id })}
-                    >
-                      Resolve
-                    </Button>
-                  ) : null}
+                  <StatusSelect
+                    compact
+                    value={esc.status}
+                    options={ESCALATION_STATUS_OPTIONS}
+                    disabled={statusMutation.isPending && statusMutation.variables?.id === esc.id}
+                    ariaLabel={`Change escalation status for ${esc.phone}`}
+                    onChange={(status) => statusMutation.mutate({ id: esc.id, status })}
+                  />
+                  {esc.phone ? <Button asChild size="sm" variant="outline"><a href={`tel:${esc.phone}`}>Call</a></Button> : null}
                 </li>
               ))}
               {(escalations.data ?? []).length === 0 ? (
@@ -802,4 +804,23 @@ function AgentEscalations() {
       </Panel>
     </ViewShell>
   );
+}
+
+const ESCALATION_STATUS_OPTIONS = {
+  open: { label: 'Open', tone: 'warning' },
+  acknowledged: { label: 'Acknowledged', tone: 'info' },
+  resolved: { label: 'Resolved', tone: 'success' },
+};
+
+function recordNavigation(rows, detail, setDetail) {
+  if (!detail || rows.length < 2) return null;
+  const index = rows.findIndex((row) => row.id === detail.id);
+  if (index < 0) return null;
+  return {
+    label: `${index + 1} of ${rows.length}`,
+    hasPrevious: index > 0,
+    hasNext: index < rows.length - 1,
+    onPrevious: () => index > 0 && setDetail(rows[index - 1]),
+    onNext: () => index < rows.length - 1 && setDetail(rows[index + 1]),
+  };
 }

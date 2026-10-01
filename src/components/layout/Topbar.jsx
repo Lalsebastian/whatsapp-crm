@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { GlobalSearch } from '@/components/layout/GlobalSearch';
 import { NotificationCenter } from '@/components/layout/NotificationCenter';
+import { QuickCreate } from '@/components/layout/QuickCreate';
 
 export function Topbar() {
   const { user, role, roleMeta } = useCurrentUser();
@@ -18,6 +19,7 @@ export function Topbar() {
   const current = modules.find((m) => m.id === searchParams.get('view')) ?? modules[0];
   const queryClient = useQueryClient();
   const fetching = useIsFetching();
+  const CurrentIcon = current?.icon;
 
   return (
     <header className="joboy-topbar bg-background/85 supports-[backdrop-filter]:bg-background/65 sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b px-4 backdrop-blur-xl lg:px-6">
@@ -32,13 +34,17 @@ export function Topbar() {
         <span>WhatsApp Bot</span>
       </div>
 
-      <div className="min-w-0 xl:block">
-        <h1 className="truncate text-sm font-semibold">{current?.label ?? roleMeta.label}</h1>
-        <p className="text-muted-foreground truncate text-[11px]">{roleMeta.description}</p>
+      <div className="topbar-context hidden min-w-0 items-center gap-2.5 sm:flex">
+        {CurrentIcon ? <span className="topbar-module-icon grid size-8 shrink-0 place-items-center"><CurrentIcon className="size-4" /></span> : null}
+        <div className="min-w-0">
+          <div className="text-muted-foreground flex items-center gap-1.5 text-[9px] font-semibold tracking-[0.12em] uppercase"><span>{roleMeta.label}</span><span className="size-1 rounded-full bg-primary" /> Workspace</div>
+          <h1 className="truncate text-sm font-semibold">{current?.label ?? roleMeta.label}</h1>
+        </div>
       </div>
 
       <div className="ml-auto flex items-center gap-2">
         <GlobalSearch />
+        <QuickCreate />
 
         {import.meta.env.DEV && (
           <Badge variant="warning" className="hidden sm:inline-flex">
@@ -58,7 +64,7 @@ export function Topbar() {
           <RefreshCw className={fetching ? 'size-4 animate-spin' : 'size-4'} />
         </Button>
 
-        <div className="flex items-center gap-2 pl-1">
+        <div className="user-chip flex items-center gap-2 rounded-xl border border-transparent px-1.5 py-1 pl-1 transition-colors hover:border-border/70 hover:bg-background/70">
           <Avatar className="size-7">
             <AvatarFallback>{initials(user.name)}</AvatarFallback>
           </Avatar>

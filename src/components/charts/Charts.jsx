@@ -54,7 +54,7 @@ export function RevenueChart({ data, className, height = 240 }) {
 }
 
 /** Booking volume split by status — colour comes from the same status palette. */
-export function VolumeChart({ data, colors, className, height = 240 }) {
+export function VolumeChart({ data, colors, className, height = 240, onItemClick }) {
   const theme = useChartTheme();
 
   const config = useMemo(
@@ -84,13 +84,20 @@ export function VolumeChart({ data, colors, className, height = 240 }) {
             callbacks: { label: (ctx) => `${ctx.parsed.y} bookings` },
           },
         },
+        onClick: (_event, elements) => {
+          const index = elements[0]?.index;
+          if (index != null) onItemClick?.((data ?? [])[index], index);
+        },
+        onHover: (event, elements) => {
+          if (event?.native?.target) event.native.target.style.cursor = elements.length && onItemClick ? 'pointer' : 'default';
+        },
         scales: {
           ...baseScales(theme),
           x: { ...baseScales(theme).x, stacked: false },
         },
       },
     }),
-    [data, colors, theme]
+    [data, colors, theme, onItemClick]
   );
 
   return (

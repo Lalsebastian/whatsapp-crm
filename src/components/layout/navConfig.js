@@ -1,9 +1,14 @@
 import {
   BarChart3,
+  ChartNoAxesCombined,
   CalendarDays,
+  ContactRound,
   ClipboardList,
   Inbox,
+  History,
   KanbanSquare,
+  MapPinned,
+  Settings2,
   User,
   Users,
   Wrench,
@@ -19,9 +24,15 @@ import { ROLE_HOME } from '@/lib/roles';
 export const ROLE_MODULES = {
   owner: [
     { id: 'overview', label: 'Overview', description: 'Business pulse', icon: BarChart3, group: 'Business' },
+    { id: 'calendar', label: 'Calendar', description: 'Schedule & agenda', icon: CalendarDays, group: 'Business' },
+    { id: 'customers', label: 'Customers', description: '360° profiles', icon: ContactRound, group: 'Business' },
+    { id: 'reports', label: 'Reports', description: 'Decision intelligence', icon: ChartNoAxesCombined, group: 'Business' },
     { id: 'bookings', label: 'Bookings', description: 'Service schedule', icon: CalendarDays, group: 'Operations' },
+    { id: 'dispatch', label: 'Dispatch', description: 'Capacity & conflicts', icon: MapPinned, group: 'Operations' },
     { id: 'complaints', label: 'Complaints', description: 'Customer care', icon: ClipboardList, group: 'Operations' },
     { id: 'escalations', label: 'Escalations', description: 'Priority cases', icon: Users, group: 'Operations' },
+    { id: 'audit', label: 'Audit log', description: 'Verified activity', icon: History, group: 'Governance' },
+    { id: 'control', label: 'Control Centre', description: 'CRM configuration', icon: Settings2, group: 'Governance' },
   ],
   agent: [
     { id: 'inbox', label: 'Inbox', description: 'Conversations', icon: Inbox, group: 'Workspace' },

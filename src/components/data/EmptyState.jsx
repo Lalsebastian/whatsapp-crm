@@ -28,11 +28,12 @@ export function EmptyState({
     >
       <div
         className={cn(
-          'bg-muted text-muted-foreground flex items-center justify-center rounded-full',
+          'empty-state-orbit bg-muted text-muted-foreground relative flex items-center justify-center rounded-full',
           compact ? 'size-9' : 'size-12'
         )}
       >
-        <Icon className={compact ? 'size-4' : 'size-5'} />
+        <span className="empty-state-ring" aria-hidden="true" />
+        <Icon className={cn('relative z-10', compact ? 'size-4' : 'size-5')} />
       </div>
 
       <div className="space-y-1">
@@ -94,10 +95,10 @@ export function ErrorState({ error, onRetry, title = 'Could not load this data' 
 export function PanelSkeleton({ rows = 4, className }) {
   return (
     <Panel className={cn('gap-0 p-4', className)}>
-      <div className="bg-muted h-3 w-32 animate-pulse rounded" />
+      <div className="premium-skeleton h-3 w-32 rounded" />
       <div className="mt-4 space-y-2.5">
         {Array.from({ length: rows }, (_, i) => (
-          <div key={i} className="bg-muted h-8 animate-pulse rounded" />
+          <div key={i} className="premium-skeleton h-8 rounded" style={{ animationDelay: `${i * 90}ms` }} />
         ))}
       </div>
     </Panel>

@@ -22,7 +22,7 @@ export function KpiCard({
   className,
 }) {
   return (
-    <Panel className={cn('surreal-kpi surface-shine group relative gap-0 overflow-hidden p-4 hover:-translate-y-1 hover:border-primary/35 hover:shadow-[0_18px_42px_rgba(15,23,42,.11)]', className)}>
+    <Panel data-tone={tone} className={cn('kpi-card surreal-kpi surface-shine group relative gap-0 overflow-hidden p-4 hover:-translate-y-1 hover:border-primary/35 hover:shadow-[0_18px_42px_rgba(15,23,42,.11)]', className)}>
       <div className={cn('kpi-accent-line absolute inset-x-0 top-0 h-0.5 origin-left opacity-70', TONE_LINE[tone] ?? TONE_LINE.neutral)} />
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -37,13 +37,17 @@ export function KpiCard({
         </div>
 
         {Icon ? (
+          <Icon className="kpi-watermark pointer-events-none absolute -right-4 -bottom-5 size-24" aria-hidden="true" />
+        ) : null}
+
+        {Icon ? (
           <div
             className={cn(
               'surreal-icon flex size-8 shrink-0 items-center justify-center transition-[transform,box-shadow,border-radius] duration-500 group-hover:rotate-6 group-hover:scale-110 group-hover:shadow-md',
               TONE_ICON[tone] ?? TONE_ICON.neutral
             )}
           >
-            <Icon className="size-4" />
+            <Icon className="size-4" strokeWidth={2.2} />
           </div>
         ) : null}
       </div>

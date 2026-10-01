@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Bell, CalendarClock, CheckCircle2, MessageSquareWarning } from 'lucide-react';
+import { AlertTriangle, Bell, CalendarClock, CheckCheck, CheckCircle2, MessageSquareWarning, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { listBookings, listComplaints, listEscalations } from '@/lib/api';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { moduleHref } from '@/components/layout/navConfig';
 import { formatDate, formatPhone } from '@/lib/utils';
+import { slaState } from '@/lib/sla';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -18,6 +19,9 @@ import {
 
 export function NotificationCenter() {
   const [open, setOpen] = useState(false);
+  const [dismissed, setDismissed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('joboy.dismissed-notifications') ?? '[]'); } catch { return []; }
+  });
   const { role } = useCurrentUser();
   const navigate = useNavigate();
   const enabled = role === 'owner' || role === 'agent';
@@ -43,7 +47,7 @@ export function NotificationCenter() {
       .map((item) => ({
         id: `escalation-${item.id}`,
         icon: AlertTriangle,
-        tone: 'warning',
+        tone: slaState(item, 'escalation').tone === 'success' ? 'warning' : slaState(item, 'escalation').tone,
         title: item.reason || 'Human handoff needs attention',
         detail: item.customer?.name ?? formatPhone(item.phone),
         module: 'escalations',
@@ -53,7 +57,7 @@ export function NotificationCenter() {
       .map((item) => ({
         id: `complaint-${item.id}`,
         icon: MessageSquareWarning,
-        tone: item.status === 'escalated' ? 'destructive' : 'warning',
+        tone: item.status === 'escalated' ? 'destructive' : slaState(item, 'complaint').tone,
         title: `${item.reference ?? 'Complaint'} · ${item.status === 'escalated' ? 'Escalated' : 'Open'}`,
         detail: item.customer?.name ?? formatPhone(item.customer?.phone),
         module: role === 'owner' ? 'complaints' : 'board',
@@ -68,14 +72,22 @@ export function NotificationCenter() {
         detail: `${item.service?.name ?? 'Service'} · ${formatDate(item.scheduled_date)}`,
         module: 'bookings',
       }));
-    return [...escalationItems, ...complaintItems, ...delayedBookings].slice(0, 30);
-  }, [notifications.data, role]);
+    return [...escalationItems, ...complaintItems, ...delayedBookings].filter((item) => !dismissed.includes(item.id)).slice(0, 30);
+  }, [notifications.data, role, dismissed]);
 
   if (!enabled) return null;
 
   function openModule(module) {
     navigate(moduleHref(role, module));
     setOpen(false);
+  }
+
+  function dismiss(id) {
+    setDismissed((current) => {
+      const next = [...new Set([...current, id])].slice(-100);
+      localStorage.setItem('joboy.dismissed-notifications', JSON.stringify(next));
+      return next;
+    });
   }
 
   return (
@@ -105,6 +117,7 @@ export function NotificationCenter() {
             </div>
             <SheetTitle className="text-xl">Attention centre</SheetTitle>
             <SheetDescription>Operational signals that may need a response.</SheetDescription>
+            {items.length ? <Button variant="outline" size="sm" className="mt-3 w-fit" onClick={() => items.forEach((item) => dismiss(item.id))}><CheckCheck />Mark all reviewed</Button> : null}
           </SheetHeader>
 
           <div className="p-3">
@@ -120,17 +133,13 @@ export function NotificationCenter() {
                   const Icon = item.icon;
                   return (
                     <li key={item.id}>
-                      <button
-                        type="button"
-                        onClick={() => openModule(item.module)}
-                        className="group hover:bg-muted/60 focus-visible:ring-ring flex w-full items-start gap-3 rounded-xl p-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                      >
-                        <span className={`notification-icon notification-icon-${item.tone}`}><Icon className="size-4" /></span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-medium">{item.title}</span>
-                          <span className="text-muted-foreground mt-0.5 block truncate text-xs">{item.detail}</span>
-                        </span>
-                      </button>
+                      <div className="group hover:bg-muted/60 flex items-start gap-1 rounded-xl p-1 transition-colors">
+                        <button type="button" onClick={() => openModule(item.module)} className="focus-visible:ring-ring flex min-w-0 flex-1 items-start gap-3 rounded-lg p-2 text-left focus-visible:ring-2 focus-visible:outline-none">
+                          <span className={`notification-icon notification-icon-${item.tone}`}><Icon className="size-4" /></span>
+                          <span className="min-w-0 flex-1"><span className="block text-sm font-medium">{item.title}</span><span className="text-muted-foreground mt-0.5 block truncate text-xs">{item.detail}</span></span>
+                        </button>
+                        <Button variant="ghost" size="icon-sm" onClick={() => dismiss(item.id)} aria-label={`Dismiss ${item.title}`}><X className="size-3.5" /></Button>
+                      </div>
                     </li>
                   );
                 })}

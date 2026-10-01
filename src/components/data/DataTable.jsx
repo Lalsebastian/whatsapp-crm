@@ -37,6 +37,7 @@ export function DataTable({
   onSelectionChange,
   onRowClick,
   pageSize = 25,
+  density = 'comfortable',
   className,
 }) {
   const [sort, setSort] = useState(null);
@@ -111,7 +112,7 @@ export function DataTable({
   }
 
   return (
-    <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
+    <div data-density={density} className={cn('data-table flex min-h-0 flex-1 flex-col', className)}>
       {/* Card list below md — a 6-column table on a 375px screen forces
           horizontal scrolling, which the plan explicitly rules out. */}
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
@@ -144,6 +145,7 @@ export function DataTable({
               return (
                 <TableRow
                   key={key}
+                  style={{ '--row-index': visible.indexOf(row) }}
                   data-state={selectedIds.includes(key) ? 'selected' : undefined}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   onKeyDown={onRowClick ? (event) => {
@@ -153,7 +155,7 @@ export function DataTable({
                     }
                   } : undefined}
                   tabIndex={onRowClick ? 0 : undefined}
-                  className={cn('transition-[background-color,transform] duration-150', onRowClick && 'cursor-pointer hover:translate-x-0.5')}
+                  className={cn('data-row-reveal transition-[background-color,transform] duration-150', onRowClick && 'cursor-pointer hover:translate-x-0.5')}
                 >
                   {selectable ? (
                     <TableCell onClick={(e) => e.stopPropagation()}>
