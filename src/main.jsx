@@ -7,6 +7,7 @@ import { UserProvider } from '@/hooks/useCurrentUser';
 import { ThemeProvider } from '@/hooks/useTheme';
 import App from '@/App';
 import '@/index.css';
+import { ToastProvider } from '@/components/feedback/ToastProvider';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,7 +28,7 @@ createRoot(document.getElementById('root')).render(
         <UserProvider>
           <ThemeProvider>
             <TooltipProvider>
-              <App />
+              <ToastProvider><App /></ToastProvider>
             </TooltipProvider>
           </ThemeProvider>
         </UserProvider>

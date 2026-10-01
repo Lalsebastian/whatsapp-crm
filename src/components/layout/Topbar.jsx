@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { GlobalSearch } from '@/components/layout/GlobalSearch';
 import { NotificationCenter } from '@/components/layout/NotificationCenter';
 import { QuickCreate } from '@/components/layout/QuickCreate';
+import { WorkspaceMenu } from '@/components/layout/WorkspaceMenu';
 
 export function Topbar() {
   const { user, role, roleMeta } = useCurrentUser();
@@ -19,6 +20,7 @@ export function Topbar() {
   const current = modules.find((m) => m.id === searchParams.get('view')) ?? modules[0];
   const queryClient = useQueryClient();
   const fetching = useIsFetching();
+  const updatedAt = Math.max(0, ...queryClient.getQueryCache().getAll().map((query) => query.state.dataUpdatedAt || 0));
   const CurrentIcon = current?.icon;
 
   return (
@@ -53,6 +55,12 @@ export function Topbar() {
         )}
 
         <NotificationCenter />
+
+        <WorkspaceMenu />
+
+        <span className="text-muted-foreground hidden text-[10px] xl:inline" aria-live="polite">
+          {fetching ? 'Refreshing data…' : updatedAt ? `Updated ${new Date(updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Waiting for data'}
+        </span>
 
         <Button
           variant="ghost"

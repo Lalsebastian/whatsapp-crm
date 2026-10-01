@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowRight, CalendarDays, CalendarPlus, ClipboardList, Command, MessageSquare, MessageSquarePlus, RefreshCw, Search, Sparkles } from 'lucide-react';
+import { ArrowRight, CalendarDays, CalendarPlus, ClipboardList, Command, MessageSquare, MessageSquarePlus, RefreshCw, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { listBookings, listComplaints, listConversationPhones } from '@/lib/api';
@@ -55,8 +55,8 @@ export function GlobalSearch() {
   const recordResults = useMemo(() => {
     const needle = value.trim().toLowerCase();
     if (needle.length < 2 || !directory.data) return [];
-    const bookings = directory.data.bookings.filter((item) => [item.reference, item.customer?.name, item.customer?.phone, item.service?.name].some((candidate) => includes(candidate, needle))).map((item) => ({ id: `booking-${item.id}`, kind: 'Booking', icon: CalendarDays, title: item.reference ?? 'Booking', detail: item.customer?.name ?? formatPhone(item.customer?.phone), module: 'bookings', search: item.reference }));
-    const complaints = directory.data.complaints.filter((item) => [item.reference, item.description, item.category, item.customer?.name, item.customer?.phone].some((candidate) => includes(candidate, needle))).map((item) => ({ id: `complaint-${item.id}`, kind: 'Complaint', icon: ClipboardList, title: item.reference ?? item.category ?? 'Complaint', detail: item.customer?.name ?? formatPhone(item.customer?.phone), module: role === 'owner' ? 'complaints' : 'board', search: item.reference }));
+    const bookings = directory.data.bookings.filter((item) => [item.reference, item.customer?.name, item.customer?.phone, item.service?.name].some((candidate) => includes(candidate, needle))).map((item) => ({ id: `booking-${item.id}`, record: item.id, kind: 'Booking', icon: CalendarDays, title: item.reference ?? 'Booking', detail: item.customer?.name ?? formatPhone(item.customer?.phone), module: 'bookings', search: item.reference }));
+    const complaints = directory.data.complaints.filter((item) => [item.reference, item.description, item.category, item.customer?.name, item.customer?.phone].some((candidate) => includes(candidate, needle))).map((item) => ({ id: `complaint-${item.id}`, record: item.id, kind: 'Complaint', icon: ClipboardList, title: item.reference ?? item.category ?? 'Complaint', detail: item.customer?.name ?? formatPhone(item.customer?.phone), module: role === 'owner' ? 'complaints' : 'board', search: item.reference }));
     const conversations = directory.data.conversations.filter((item) => includes(item.phone, needle)).map((item) => ({ id: `conversation-${item.phone}`, kind: 'Conversation', icon: MessageSquare, title: formatPhone(item.phone), detail: 'WhatsApp conversation', module: 'inbox', search: item.phone }));
     return [...bookings, ...complaints, ...conversations].slice(0, MAX_RESULTS);
   }, [directory.data, role, value]);
@@ -79,7 +79,7 @@ export function GlobalSearch() {
     setOpen(false);
     setValue('');
     if (command.action) command.action();
-    else if (command.module) navigate(`${moduleHref(role, command.module)}${command.search ? `&search=${encodeURIComponent(command.search)}` : ''}`);
+    else if (command.module) navigate(`${moduleHref(role, command.module)}${command.search ? `&search=${encodeURIComponent(command.search)}` : ''}${command.record ? `&record=${encodeURIComponent(command.record)}` : ''}`);
   }
 
   function onInputKeyDown(event) {
@@ -97,7 +97,7 @@ export function GlobalSearch() {
         <div className="command-search relative border-b p-3"><Search className="text-muted-foreground absolute top-1/2 left-6 size-5 -translate-y-1/2" /><Input ref={inputRef} value={value} onChange={(event) => { setValue(event.target.value); setActiveIndex(0); }} onKeyDown={onInputKeyDown} placeholder="Search records or type a command…" className="h-12 border-0 bg-transparent pr-16 pl-11 text-base shadow-none focus-visible:ring-0" /><kbd className="text-muted-foreground absolute top-1/2 right-6 -translate-y-1/2 rounded-md border bg-muted/60 px-2 py-1 text-[10px]">ESC</kbd></div>
         <div className="command-aurora" aria-hidden="true"><i /><i /></div>
         <div className="relative max-h-[56dvh] overflow-y-auto p-2">
-          <div className="text-muted-foreground flex items-center gap-2 px-3 py-2 text-[10px] font-bold tracking-[.18em] uppercase"><Sparkles className="size-3" />{value.trim().length >= 2 ? 'Matching CRM records' : 'Command workspace'}</div>
+          <div className="text-muted-foreground flex items-center gap-2 px-3 py-2 text-[10px] font-bold tracking-[.14em] uppercase"><Command className="size-3" />{value.trim().length >= 2 ? 'Matching CRM records' : 'Search and shortcuts'}</div>
           {directory.isLoading && value.trim().length >= 2 ? <div className="space-y-2 p-3">{Array.from({ length: 4 }, (_, index) => <div key={index} className="premium-skeleton h-12 rounded-xl" />)}</div> : commands.length ? <ul className="space-y-1">{commands.map((command, index) => {
             const Icon = command.icon || Command;
             return <li key={command.id}><button type="button" onMouseEnter={() => setActiveIndex(index)} onClick={() => run(command)} className={`command-result group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left outline-none ${activeIndex === index ? 'is-active' : ''}`}><span className="command-result-icon grid size-10 shrink-0 place-items-center rounded-xl"><Icon className="size-[18px]" /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{command.title}</span><span className="text-muted-foreground block truncate text-xs">{command.detail ?? command.description}</span></span><span className="text-muted-foreground text-[9px] font-bold tracking-wider uppercase">{command.kind}</span><ArrowRight className="size-3.5 -translate-x-1 opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" /></button></li>;

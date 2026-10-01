@@ -31,6 +31,7 @@ export function DataTable({
   loading = false,
   emptyTitle = 'Nothing here yet',
   emptyDescription,
+  emptyAction,
   hasFilters = false,
   onClearFilters,
   selectedIds = [],
@@ -107,7 +108,7 @@ export function DataTable({
     return hasFilters ? (
       <EmptyFilter onClear={onClearFilters} title={emptyTitle} description={emptyDescription} compact />
     ) : (
-      <EmptyState title={emptyTitle} description={emptyDescription} compact />
+      <EmptyState title={emptyTitle} description={emptyDescription} action={emptyAction} compact />
     );
   }
 
@@ -153,9 +154,13 @@ export function DataTable({
                       event.preventDefault();
                       onRowClick(row);
                     }
+                    if (event.key === 'ArrowDown') { event.preventDefault(); event.currentTarget.nextElementSibling?.focus(); }
+                    if (event.key === 'ArrowUp') { event.preventDefault(); event.currentTarget.previousElementSibling?.focus(); }
+                    if (event.key === 'Home') { event.preventDefault(); event.currentTarget.parentElement?.firstElementChild?.focus(); }
+                    if (event.key === 'End') { event.preventDefault(); event.currentTarget.parentElement?.lastElementChild?.focus(); }
                   } : undefined}
                   tabIndex={onRowClick ? 0 : undefined}
-                  className={cn('data-row-reveal transition-[background-color,transform] duration-150', onRowClick && 'cursor-pointer hover:translate-x-0.5')}
+                  className={cn('data-row-reveal focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:outline-none transition-[background-color,transform] duration-150', onRowClick && 'cursor-pointer hover:translate-x-0.5')}
                 >
                   {selectable ? (
                     <TableCell onClick={(e) => e.stopPropagation()}>
@@ -184,6 +189,8 @@ export function DataTable({
               <li
                 key={key}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onKeyDown={onRowClick ? (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onRowClick(row); } } : undefined}
+                tabIndex={onRowClick ? 0 : undefined}
                 className={cn(
                   'flex flex-col gap-2 px-4 py-3 transition-colors duration-150',
                   onRowClick && 'cursor-pointer active:bg-muted/60'
@@ -226,7 +233,7 @@ export function DataTable({
         {loading ? (
           <div className="flex flex-col gap-2 p-4">
             {Array.from({ length: 5 }, (_, i) => (
-              <div key={i} className="bg-muted h-9 animate-pulse rounded" />
+              <div key={i} className="premium-skeleton h-9 rounded" />
             ))}
           </div>
         ) : null}
@@ -270,7 +277,7 @@ function SortableHead({ column, sort, onSort }) {
   const Icon = active ? (sort.direction === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown;
 
   return (
-    <TableHead className={cn(column.headerClassName)}>
+    <TableHead className={cn(column.headerClassName)} aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : column.sortable === false ? undefined : 'none'}>
       {column.sortable === false ? (
         column.header
       ) : (

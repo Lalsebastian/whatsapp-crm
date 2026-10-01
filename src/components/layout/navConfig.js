@@ -24,10 +24,10 @@ import { ROLE_HOME } from '@/lib/roles';
 
 export const ROLE_MODULES = {
   owner: [
-    { id: 'overview', label: 'Overview', description: 'Business pulse', icon: BarChart3, group: 'Business' },
+    { id: 'overview', label: 'Overview', description: 'Business summary', icon: BarChart3, group: 'Business' },
     { id: 'calendar', label: 'Calendar', description: 'Schedule & agenda', icon: CalendarDays, group: 'Business' },
     { id: 'customers', label: 'Customers', description: '360° profiles', icon: ContactRound, group: 'Business' },
-    { id: 'reports', label: 'Reports', description: 'Decision intelligence', icon: ChartNoAxesCombined, group: 'Business' },
+    { id: 'reports', label: 'Reports', description: 'Performance reports', icon: ChartNoAxesCombined, group: 'Business' },
     { id: 'chatbot-analytics', label: 'Chatbot Analytics', description: 'Conversation performance', icon: Bot, group: 'Business' },
     { id: 'bookings', label: 'Bookings', description: 'Service schedule', icon: CalendarDays, group: 'Operations' },
     { id: 'dispatch', label: 'Dispatch', description: 'Capacity & conflicts', icon: MapPinned, group: 'Operations' },

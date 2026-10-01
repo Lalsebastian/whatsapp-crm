@@ -112,7 +112,7 @@ export function NotificationCenter() {
         <SheetContent className="w-full gap-0 overflow-y-auto p-0 sm:max-w-md">
           <SheetHeader className="notification-hero border-b p-6 pr-12">
             <div className="mb-2 flex items-center gap-2">
-              <span className="surreal-icon grid size-9 place-items-center bg-primary/15 text-primary"><Bell className="size-4" /></span>
+              <span className="clay-icon grid size-9 place-items-center bg-primary/15 text-primary"><Bell className="size-4" /></span>
               <Badge variant={items.length ? 'warning' : 'success'}>{items.length ? `${items.length} active` : 'All clear'}</Badge>
             </div>
             <SheetTitle className="text-xl">Attention centre</SheetTitle>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, useNavigate, useSearchParams } from 'react-router-dom';
-import { Bot, ChevronDown, Moon, PanelLeftClose, PanelLeftOpen, ShieldAlert, Sparkles, Sun, UserRoundCog } from 'lucide-react';
+import { Activity, Bot, ChevronDown, Moon, PanelLeftClose, PanelLeftOpen, ShieldAlert, Sun, UserRoundCog } from 'lucide-react';
 import joboyLogo from '@/assets/joboy-logo.png';
 import { cn } from '@/lib/utils';
 import { ROLE_META, useCurrentUser } from '@/hooks/useCurrentUser';
@@ -74,8 +74,8 @@ function NavItems({ role, activeModule, collapsed }) {
           className={cn('group/nav relative flex items-center overflow-hidden rounded-2xl text-[13px] font-semibold transition-all duration-300', collapsed ? 'justify-center p-1.5' : 'gap-3 p-2', isActive ? 'joboy-nav-active text-sidebar-foreground ring-primary/15 ring-1' : 'text-sidebar-foreground/62 hover:bg-sidebar-muted hover:text-sidebar-foreground')}
         >
           {isActive ? <span className="bg-primary absolute top-1/2 -left-3 h-7 w-1 -translate-y-1/2 rounded-r-full" /> : null}
-          <span className={cn('surreal-nav-icon grid size-11 shrink-0 place-items-center transition-all duration-500', isActive ? 'joboy-gradient text-primary-foreground shadow-primary/25 shadow-lg' : 'bg-sidebar-muted/75 text-sidebar-foreground/55 group-hover/nav:bg-card group-hover/nav:text-info group-hover/nav:-translate-y-0.5 group-hover/nav:scale-105 group-hover/nav:shadow-md')}>
-            <mod.icon className="size-[19px] transition-transform duration-300 group-hover/nav:rotate-3" strokeWidth={isActive ? 2.3 : 1.9} />
+          <span className={cn('clay-nav-icon grid size-11 shrink-0 place-items-center transition-all duration-300', isActive ? 'joboy-gradient text-primary-foreground shadow-primary/25 shadow-lg' : 'bg-sidebar-muted/75 text-sidebar-foreground/55 group-hover/nav:bg-card group-hover/nav:text-info group-hover/nav:-translate-y-0.5 group-hover/nav:shadow-md')}>
+            <mod.icon className="size-[19px] transition-transform duration-300 group-hover/nav:scale-105" strokeWidth={isActive ? 2.3 : 1.9} />
           </span>
           {!collapsed ? <span className="min-w-0 flex-1 animate-in fade-in duration-200"><span className="block truncate">{mod.label}</span><span className="text-sidebar-foreground/38 mt-0.5 block truncate text-[10px] font-medium">{mod.description}</span></span> : null}
         </NavLink></li>;
@@ -100,7 +100,7 @@ function MotionRow({ collapsed }) {
   return <div className={cn('border-sidebar-border flex items-center border-t py-3', collapsed ? 'justify-center px-3' : 'justify-between px-5')}>
     {!collapsed ? <span className="text-sidebar-foreground/80 text-[12px]">Motion</span> : null}
     <DropdownMenu>
-      <DropdownMenuTrigger asChild><Button variant="ghost" size={collapsed ? 'icon' : 'sm'} title={`Motion: ${labels[motion]}`}><Sparkles className="size-4" />{!collapsed ? labels[motion] : null}</Button></DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild><Button variant="ghost" size={collapsed ? 'icon' : 'sm'} title={`Motion: ${labels[motion]}`}><Activity className="size-4" />{!collapsed ? labels[motion] : null}</Button></DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
         <DropdownMenuLabel>Animation intensity</DropdownMenuLabel>
         {Object.entries(labels).map(([value, label]) => <DropdownMenuItem key={value} onSelect={() => setMotion(value)} className={motion === value ? 'bg-muted font-semibold' : ''}>{label}</DropdownMenuItem>)}

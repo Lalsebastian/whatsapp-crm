@@ -15,6 +15,7 @@ export function BulkActionBar({ count, onClear, children, className }) {
 
   return (
     <div
+      data-bulk-actions
       role="region"
       aria-label="Bulk actions"
       className={cn(

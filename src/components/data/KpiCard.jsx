@@ -43,7 +43,7 @@ export function KpiCard({
         {Icon ? (
           <div
             className={cn(
-              'surreal-icon flex size-8 shrink-0 items-center justify-center transition-[transform,box-shadow,border-radius] duration-500 group-hover:rotate-6 group-hover:scale-110 group-hover:shadow-md',
+              'clay-icon flex size-8 shrink-0 items-center justify-center transition-[transform,box-shadow] duration-300 group-hover:-translate-y-0.5 group-hover:shadow-md',
               TONE_ICON[tone] ?? TONE_ICON.neutral
             )}
           >

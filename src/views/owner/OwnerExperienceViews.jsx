@@ -24,7 +24,7 @@ import {
   Receipt,
   UsersRound,
 } from 'lucide-react';
-import { listBookings, listComplaints, listCustomers, listEscalations, queryKeys, updateBooking, updateCustomer } from '@/lib/api';
+import { listBookings, listComplaints, listCustomers, listEscalations, listRecentMessages, queryKeys, updateBooking, updateCustomer } from '@/lib/api';
 import { BOOKING_STATUS, complaintStatus } from '@/lib/status';
 import { formatCurrency, formatDate, formatDateTime, formatNumber, formatPhone } from '@/lib/utils';
 import { ViewShell } from '@/components/layout/ViewShell';
@@ -69,7 +69,7 @@ export function TodayCommandCentre({ onNavigate }) {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-info dark:text-primary text-[10px] font-bold tracking-[0.2em] uppercase">Today · {format(new Date(), 'EEEE, d MMMM')}</div>
-          <h2 className="mt-1 text-lg font-semibold tracking-tight">Live operating picture</h2>
+          <h2 className="mt-1 text-lg font-semibold tracking-tight">Today’s workload</h2>
         </div>
         <Button variant="outline" size="sm" onClick={() => onNavigate('calendar')}>Open calendar <ArrowRight /></Button>
       </div>
@@ -221,7 +221,7 @@ export function OwnerCalendar() {
 }
 
 function CalendarMetric({ label, value, icon: Icon }) {
-  return <div className="flex items-center gap-3 rounded-2xl border bg-card/80 p-4 shadow-sm"><span className="surreal-icon grid size-10 place-items-center bg-info/10 text-info dark:bg-primary/10 dark:text-primary"><Icon /></span><span><span className="text-muted-foreground block text-xs">{label}</span><span className="tabular text-2xl font-semibold">{formatNumber(value)}</span></span></div>;
+  return <div className="flex items-center gap-3 rounded-2xl border bg-card/80 p-4 shadow-sm"><span className="clay-icon grid size-10 place-items-center bg-info/10 text-info dark:bg-primary/10 dark:text-primary"><Icon /></span><span><span className="text-muted-foreground block text-xs">{label}</span><span className="tabular text-2xl font-semibold">{formatNumber(value)}</span></span></div>;
 }
 
 export function OwnerCustomers() {
@@ -232,16 +232,33 @@ export function OwnerCustomers() {
   const directory = useQuery({
     queryKey: ['customers', 'owner-360'],
     queryFn: async () => {
-      const [customers, bookings, complaints] = await Promise.all([listCustomers(), listBookings({}), listComplaints({})]);
+      const [customers, bookings, complaints, escalations, messages] = await Promise.all([
+        listCustomers(),
+        listBookings({}),
+        listComplaints({}),
+        listEscalations({}),
+        listRecentMessages(500).catch(() => []),
+      ]);
       return customers.map((customer) => {
         const customerBookings = bookings.filter((item) => item.customer_id === customer.id);
         const customerComplaints = complaints.filter((item) => item.customer_id === customer.id);
+        const customerEscalations = escalations.filter((item) => item.customer_id === customer.id || item.phone === customer.phone);
+        const customerMessages = messages.filter((item) => item.phone === customer.phone);
+        const activityTimeline = [
+          ...customerBookings.map((item) => ({ label: `Booking · ${item.reference}`, value: `${formatDateTime(item.created_at)} · ${BOOKING_STATUS[item.status]?.label ?? item.status}`, timestamp: item.created_at })),
+          ...customerComplaints.map((item) => ({ label: `Complaint · ${item.reference}`, value: `${formatDateTime(item.created_at)} · ${complaintStatus(item.status).label}`, timestamp: item.created_at })),
+          ...customerEscalations.map((item) => ({ label: 'Escalation', value: `${formatDateTime(item.created_at)} · ${item.reason ?? item.status}`, timestamp: item.created_at })),
+          ...customerMessages.map((item) => ({ label: item.direction === 'outbound' ? 'WhatsApp reply sent' : 'WhatsApp message received', value: `${formatDateTime(item.created_at)} · ${String(item.body ?? item.text ?? 'Message').slice(0, 90)}`, timestamp: item.created_at })),
+        ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
         return {
           ...customer,
           bookings: customerBookings,
           complaints: customerComplaints,
+          escalations: customerEscalations,
+          conversations: customerMessages,
+          activityTimeline,
           lifetimeValue: customerBookings.filter((item) => item.status === 'completed').reduce((total, item) => total + (Number(item.price) || 0), 0),
-          lastActivity: [...customerBookings.map((item) => item.created_at), ...customerComplaints.map((item) => item.created_at)].filter(Boolean).sort().at(-1) ?? customer.created_at,
+          lastActivity: activityTimeline[0]?.timestamp ?? customer.created_at,
         };
       });
     },
@@ -298,16 +315,17 @@ export function OwnerCustomers() {
         ) : null}
         fields={detail ? [
           ['Phone', formatPhone(detail.phone)], ['Preferred language', detail.preferred_language?.toUpperCase()], ['Bookings', formatNumber(detail.bookings.length)],
-          ['Complaints', formatNumber(detail.complaints.length)], ['Lifetime value', formatCurrency(detail.lifetimeValue)], ['Customer since', formatDate(detail.created_at)],
+          ['Complaints', formatNumber(detail.complaints.length)], ['Escalations', formatNumber(detail.escalations.length)], ['WhatsApp messages', formatNumber(detail.conversations.length)],
+          ['Lifetime value', formatCurrency(detail.lifetimeValue)], ['Customer since', formatDate(detail.created_at)],
         ] : []}
-        timeline={detail ? [...detail.bookings.map((item) => ({ label: `Booking · ${item.reference}`, value: `${formatDate(item.created_at)} · ${BOOKING_STATUS[item.status]?.label ?? item.status}` })), ...detail.complaints.map((item) => ({ label: `Complaint · ${item.reference}`, value: `${formatDate(item.created_at)} · ${complaintStatus(item.status).label}` }))].slice(0, 12) : []}
+        timeline={detail ? detail.activityTimeline.slice(0, 24) : []}
       />
     </ViewShell>
   );
 }
 
 function CustomerMetric({ label, value, icon: Icon }) {
-  return <div className="flex items-center gap-3 rounded-2xl border border-white/40 bg-background/65 p-3 backdrop-blur"><span className="surreal-icon grid size-10 place-items-center bg-primary/12 text-primary"><Icon /></span><span><span className="text-muted-foreground block text-xs">{label}</span><span className="tabular text-xl font-semibold">{value}</span></span></div>;
+  return <div className="flex items-center gap-3 rounded-2xl border border-white/40 bg-background/65 p-3 backdrop-blur"><span className="clay-icon grid size-10 place-items-center bg-primary/12 text-primary"><Icon /></span><span><span className="text-muted-foreground block text-xs">{label}</span><span className="tabular text-xl font-semibold">{value}</span></span></div>;
 }
 
 function CustomerIntelligence({ customer, mutation }) {

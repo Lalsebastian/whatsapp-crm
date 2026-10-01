@@ -6,9 +6,11 @@ import { MobileNavDrawer, MobileNavProvider } from '@/components/layout/MobileNa
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { useTheme } from '@/hooks/useTheme';
 import { useMotionPreference } from '@/hooks/useMotionPreference';
+import { useWorkspacePreferences } from '@/hooks/useWorkspacePreferences';
 
 function ShellChrome() {
   const { resolvedTheme } = useTheme();
+  const { density } = useWorkspacePreferences();
   useMotionPreference();
   const canvasRef = useRef(null);
 
@@ -32,7 +34,9 @@ function ShellChrome() {
         canvasRef.current?.style.setProperty('--parallax-y', `${parallaxY}px`);
       }}
       className="app-canvas dreamscape text-foreground relative flex min-h-dvh overflow-x-hidden"
+      data-ui-density={density}
     >
+      <a href="#crm-main" className="skip-link">Skip to main content</a>
       <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden="true">
         <div className="ambient-orb bg-primary/12 absolute -top-40 right-[8%] size-[30rem] rounded-full blur-3xl" />
         <div className="ambient-orb ambient-orb-delayed bg-info/8 absolute bottom-[-14rem] left-[18%] size-[34rem] rounded-full blur-3xl" />
@@ -42,7 +46,7 @@ function ShellChrome() {
         <div className="surreal-constellation absolute inset-0"><i /><i /><i /><i /><i /><i /></div>
         <div className="cursor-spotlight absolute inset-0" />
         <div className="surreal-scene absolute inset-0">
-          <div className="surreal-sun"><span /></div>
+          <div className="surreal-sun" />
           <div className="surreal-orbit"><span /></div>
           <div className="surreal-monolith" />
           <div className="surreal-ribbon" />
@@ -56,7 +60,7 @@ function ShellChrome() {
 
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
         <Topbar />
-        <main className="min-w-0 flex-1 pb-20 lg:pb-0">
+        <main id="crm-main" tabIndex="-1" className="min-w-0 flex-1 pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-0">
           <Outlet />
         </main>
       </div>

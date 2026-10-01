@@ -9,10 +9,10 @@ import {
   CalendarDays,
   ChevronRight,
   CircleAlert,
+  Download,
   Gauge,
   MessageSquareWarning,
   Receipt,
-  Sparkles,
   Star,
   TrendingUp,
   UsersRound,
@@ -25,8 +25,11 @@ import {
   listEscalations,
   queryKeys,
   updateBooking,
+  updateBookingStatuses,
   updateComplaint,
+  updateComplaintStatuses,
   updateEscalation,
+  updateEscalationStatuses,
 } from '@/lib/api';
 import { useLiveUpdates } from '@/hooks/useRealtime';
 import {
@@ -53,6 +56,7 @@ import { DashboardCustomizer } from '@/components/data/DashboardCustomizer';
 import { BookingWorkflow } from '@/components/data/BookingWorkflow';
 import { TableViewControls } from '@/components/data/TableViewControls';
 import { SlaBadge } from '@/components/data/SlaBadge';
+import { BulkActionBar } from '@/components/data/BulkActionBar';
 import { useDashboardWidgets } from '@/hooks/useDashboardWidgets';
 import { useTableView } from '@/hooks/useTableView';
 import { MixChart, RevenueChart, VolumeChart } from '@/components/charts/Charts';
@@ -63,6 +67,9 @@ import { OwnerControlCentre } from '@/views/owner/OwnerControlCentre';
 import { ChatbotAnalytics } from '@/views/owner/ChatbotAnalytics';
 import { Button } from '@/components/ui/button';
 import { Panel, PanelBody, PanelHeader, PanelTitle } from '@/components/layout/Panel';
+import { toast } from '@/lib/toast';
+import { downloadCsv, stamp } from '@/lib/csv';
+import { useWorkspacePreferences } from '@/hooks/useWorkspacePreferences';
 
 /*
  * Owner / Manager — the business view.
@@ -73,7 +80,9 @@ import { Panel, PanelBody, PanelHeader, PanelTitle } from '@/components/layout/P
  */
 export function OwnerDashboard() {
   const { active, setModule } = useModule('overview');
-  const [range, setRange] = useState('30d');
+  const workspace = useWorkspacePreferences();
+  const [range, setRangeState] = useState(workspace.defaultRange);
+  const setRange = (nextRange) => { setRangeState(nextRange); workspace.setDefaultRange(nextRange); };
   const dashboard = useDashboardWidgets();
 
   // Bookings and complaints feed the tiles and the charts, so a status change
@@ -111,7 +120,7 @@ export function OwnerDashboard() {
 
   if (overview.isLoading) {
     return (
-      <ViewShell title="Executive overview" description="Preparing your business command centre">
+      <ViewShell title="Executive overview" description="Loading your business overview">
         <KpiGrid>
           {Array.from({ length: 6 }, (_, i) => (
             <KpiCard key={i} label="Loading…" value="—" loading />
@@ -133,7 +142,7 @@ export function OwnerDashboard() {
   return (
     <ViewShell
       title="Executive overview"
-      description="Performance, priorities and customer operations in one command centre"
+      description="Revenue, workload and customer service for the selected period"
       actions={
         <>
           <DashboardCustomizer widgets={dashboard.widgets} onToggle={dashboard.toggle} onReset={dashboard.reset} />
@@ -158,8 +167,8 @@ export function OwnerDashboard() {
 
       {dashboard.widgets.performance ? <>
         <SectionHeading
-          eyebrow="Performance pulse"
-          title="The numbers that move the business"
+          eyebrow="Performance"
+          title="Results for the selected period"
           description="Every metric is calculated from the selected reporting period."
         />
         <KpiGrid>
@@ -220,9 +229,9 @@ export function OwnerDashboard() {
 
       {dashboard.widgets.revenue || dashboard.widgets.operations ? (
         <SectionHeading
-          eyebrow="Decision intelligence"
-          title="See momentum and pressure points"
-          description="Use the operational pulse to move directly into the records behind each signal."
+          eyebrow="Trends and workload"
+          title="See what is moving and what needs attention"
+          description="Open the records behind each total when you need the detail."
         />
       ) : null}
 
@@ -368,14 +377,14 @@ function ExecutiveHero({ kpis, utilisation, range, onNavigate }) {
                 <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60 motion-reduce:animate-none" />
                 <span className="relative inline-flex size-2 rounded-full bg-success" />
               </span>
-              Live business command centre
+              Updated from current CRM records
             </div>
             <h2 className="max-w-2xl text-2xl leading-tight font-semibold tracking-[-0.035em] md:text-4xl">
-              Clarity for every decision,
-              <span className="hero-gradient-text block">from booking to customer delight.</span>
+              A clear view of the day,
+              <span className="hero-gradient-text block">from first booking to follow-up.</span>
             </h2>
             <p className="text-muted-foreground mt-3 max-w-2xl text-sm leading-6 md:text-base">
-              A live operating picture for {periodLabel}, with the signals that need your attention brought forward.
+              Revenue, workload and customer issues for {periodLabel}, with urgent work brought to the top.
             </p>
           </div>
 
@@ -405,8 +414,8 @@ function ExecutiveHero({ kpis, utilisation, range, onNavigate }) {
               <div className="text-sm font-semibold">Priority radar</div>
               <div className="text-muted-foreground text-xs">Where to focus next</div>
             </div>
-            <div className="surreal-icon flex size-9 items-center justify-center bg-primary/10 text-primary">
-              <Sparkles className="size-4" />
+            <div className="clay-icon flex size-9 items-center justify-center bg-primary/10 text-primary">
+              <CircleAlert className="size-4" />
             </div>
           </div>
           <div className="space-y-2">
@@ -457,8 +466,8 @@ function OperationalPulse({ kpis, bookingsByStatus, onNavigate, className }) {
     <Panel className={className}>
       <div className="border-border/70 flex items-start justify-between border-b px-4 py-3">
         <div>
-          <div className="text-sm font-semibold">Operational pulse</div>
-          <div className="text-muted-foreground text-xs">Live work requiring visibility</div>
+          <div className="text-sm font-semibold">Work requiring attention</div>
+          <div className="text-muted-foreground text-xs">Open work and customer issues</div>
         </div>
         <span className="flex items-center gap-1.5 rounded-full bg-success/10 px-2 py-1 text-[10px] font-semibold text-success">
           <span className="size-1.5 rounded-full bg-success" /> Live
@@ -671,10 +680,10 @@ function OwnerBookings({ overview }) {
 
 function OwnerBookingRecords() {
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [status, setStatus] = useState(() => searchParams.get('status') ?? 'all');
-  const [detail, setDetail] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
   const bookings = useQuery({
     queryKey: ['bookings', 'owner-records'],
     queryFn: () => listBookings({}),
@@ -684,8 +693,20 @@ function OwnerBookingRecords() {
     onSuccess: (updated, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bookings.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
-      setDetail((current) => current?.id === variables.id ? { ...current, ...(updated ?? {}), status: variables.status } : current);
+      queryClient.setQueryData(['bookings', 'owner-records'], (current = []) => current.map((row) => row.id === variables.id ? { ...row, ...(updated ?? {}), status: variables.status } : row));
+      toast({ title: 'Booking status updated', description: `${variables.reference ?? 'Booking'} is now ${humanise(variables.status)}.`, action: variables.previousStatus ? { label: 'Undo', onClick: async () => { await updateBooking(variables.id, { status: variables.previousStatus }); queryClient.invalidateQueries({ queryKey: queryKeys.bookings.all }); queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all }); toast({ title: 'Booking change undone', tone: 'info' }); } } : null });
     },
+    onError: (error) => toast({ title: 'Booking update failed', description: error.message, tone: 'error' }),
+  });
+  const bulkMutation = useMutation({
+    mutationFn: (nextStatus) => updateBookingStatuses(selectedIds, { status: nextStatus }),
+    onSuccess: (_updated, nextStatus) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.bookings.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
+      toast({ title: `${selectedIds.length} bookings updated`, description: `Status changed to ${BOOKING_STATUS[nextStatus]?.label ?? humanise(nextStatus)}.` });
+      setSelectedIds([]);
+    },
+    onError: (error) => toast({ title: 'Bulk update failed', description: error.message, tone: 'error' }),
   });
 
   const rows = (bookings.data ?? []).filter((booking) => {
@@ -696,6 +717,12 @@ function OwnerBookingRecords() {
     return [booking.reference, booking.service?.name, booking.customer?.name, booking.customer?.phone]
       .some((value) => String(value ?? '').toLowerCase().includes(needle));
   });
+  const detail = (bookings.data ?? []).find((row) => row.id === searchParams.get('record')) ?? null;
+  const openDetail = (record) => setSearchParams((current) => {
+    const next = new URLSearchParams(current);
+    if (record?.id) next.set('record', record.id); else next.delete('record');
+    return next;
+  }, { replace: true });
 
   const columns = [
     { key: 'reference', header: 'Reference', required: true, cell: (row) => <span className="tabular font-medium">{row.reference}</span> },
@@ -703,8 +730,8 @@ function OwnerBookingRecords() {
     { key: 'customer', header: 'Customer', sortValue: (row) => row.customer?.name ?? row.customer?.phone, cell: (row) => row.customer?.name ?? formatPhone(row.customer?.phone) },
     { key: 'scheduled_date', header: 'Scheduled', cell: (row) => <span className="text-xs">{formatDate(row.scheduled_date)} {row.scheduled_time?.slice(0, 5) ?? ''}</span> },
     { key: 'price', header: 'Value', sortValue: (row) => Number(row.price) || 0, cell: (row) => <span className="tabular">{formatCurrency(row.price)}</span> },
-    { key: 'status', header: 'Status', required: true, sortValue: (row) => row.status, cell: (row) => <StatusSelect compact value={row.status} options={BOOKING_STATUS} disabled={statusMutation.isPending && statusMutation.variables?.id === row.id} ariaLabel={`Change status for ${row.reference}`} onChange={(nextStatus) => statusMutation.mutate({ id: row.id, status: nextStatus })} /> },
-    { key: 'actions', header: 'Actions', required: true, sortable: false, cell: (row) => <OpenRecordButton onClick={() => setDetail(row)} /> },
+    { key: 'status', header: 'Status', required: true, sortValue: (row) => row.status, cell: (row) => <StatusSelect compact value={row.status} options={BOOKING_STATUS} disabled={statusMutation.isPending && statusMutation.variables?.id === row.id} ariaLabel={`Change status for ${row.reference}`} onChange={(nextStatus) => statusMutation.mutate({ id: row.id, status: nextStatus, previousStatus: row.status, reference: row.reference })} /> },
+    { key: 'actions', header: 'Actions', required: true, sortable: false, cell: (row) => <OpenRecordButton onClick={() => openDetail(row)} /> },
   ];
   const tableView = useTableView('joboy.table.owner.bookings', columns);
 
@@ -752,22 +779,43 @@ function OwnerBookingRecords() {
             columns={tableView.visibleColumns}
             rows={rows}
             loading={bookings.isLoading}
-            onRowClick={setDetail}
+            onRowClick={openDetail}
             pageSize={15}
             density={tableView.density}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
             emptyTitle="No bookings found"
+            emptyDescription={status !== 'all' || search ? 'Try a broader search or clear the current status filter.' : 'Create the first booking to start building the service schedule.'}
+            emptyAction={!search && status === 'all' ? <Button size="sm" onClick={() => window.dispatchEvent(new CustomEvent('joboy:quick-create', { detail: 'booking' }))}>Create booking</Button> : null}
             hasFilters={Boolean(search) || status !== 'all'}
             onClearFilters={() => { setSearch(''); setStatus('all'); }}
           />
         </PanelBody>
       </Panel>
+      <RecordBulkActions
+        selectedIds={selectedIds}
+        rows={rows}
+        statusOptions={BOOKING_STATUS}
+        pending={bulkMutation.isPending}
+        onApply={(nextStatus) => bulkMutation.mutate(nextStatus)}
+        onClear={() => setSelectedIds([])}
+        exportName="bookings"
+        exportColumns={[
+          { header: 'Reference', value: (row) => row.reference },
+          { header: 'Customer', value: (row) => row.customer?.name ?? row.customer?.phone },
+          { header: 'Service', value: (row) => row.service?.name },
+          { header: 'Scheduled', value: (row) => `${row.scheduled_date ?? ''} ${row.scheduled_time ?? ''}` },
+          { header: 'Status', value: (row) => row.status },
+          { header: 'Value', value: (row) => row.price },
+        ]}
+      />
       <RecordDrawer
         record={detail}
         activityEntity="booking"
         title={detail?.reference ?? 'Booking details'}
         description="Complete booking and customer information"
-        onClose={() => setDetail(null)}
-        navigation={recordNavigation(rows, detail, setDetail)}
+        onClose={() => openDetail(null)}
+        navigation={recordNavigation(rows, detail, openDetail)}
         summary={detail ? <BookingWorkflow status={detail.status} /> : null}
         actions={detail ? (
           <RecordActionBar label="Booking actions" error={statusMutation.error?.message} success={statusMutation.isSuccess && statusMutation.variables?.id === detail.id ? 'Booking status updated' : null}>
@@ -776,7 +824,7 @@ function OwnerBookingRecords() {
               options={BOOKING_STATUS}
               disabled={statusMutation.isPending && statusMutation.variables?.id === detail.id}
               ariaLabel={`Change status for ${detail.reference}`}
-              onChange={(nextStatus) => statusMutation.mutate({ id: detail.id, status: nextStatus })}
+              onChange={(nextStatus) => statusMutation.mutate({ id: detail.id, status: nextStatus, previousStatus: detail.status, reference: detail.reference })}
             />
             {detail.customer?.phone ? <Button asChild variant="outline" size="sm"><a href={`tel:${detail.customer.phone}`}>Call customer</a></Button> : null}
           </RecordActionBar>
@@ -868,10 +916,10 @@ function OwnerComplaints({ overview }) {
 
 function OwnerComplaintRecords() {
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [status, setStatus] = useState(() => searchParams.get('status') ?? 'all');
-  const [detail, setDetail] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
   const complaints = useQuery({
     queryKey: ['complaints', 'owner-records'],
     queryFn: () => listComplaints({}),
@@ -881,8 +929,20 @@ function OwnerComplaintRecords() {
     onSuccess: (updated, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.complaints.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
-      setDetail((current) => current?.id === variables.id ? { ...current, ...(updated ?? {}), status: variables.status } : current);
+      queryClient.setQueryData(['complaints', 'owner-records'], (current = []) => current.map((row) => row.id === variables.id ? { ...row, ...(updated ?? {}), status: variables.status } : row));
+      toast({ title: 'Complaint status updated', description: `${variables.reference ?? 'Complaint'} is now ${humanise(variables.status)}.`, action: variables.previousStatus ? { label: 'Undo', onClick: async () => { await updateComplaint(variables.id, { status: variables.previousStatus }); queryClient.invalidateQueries({ queryKey: queryKeys.complaints.all }); queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all }); toast({ title: 'Complaint change undone', tone: 'info' }); } } : null });
     },
+    onError: (error) => toast({ title: 'Complaint update failed', description: error.message, tone: 'error' }),
+  });
+  const bulkMutation = useMutation({
+    mutationFn: (nextStatus) => updateComplaintStatuses(selectedIds, { status: nextStatus }),
+    onSuccess: (_updated, nextStatus) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.complaints.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
+      toast({ title: `${selectedIds.length} complaints updated`, description: `Status changed to ${COMPLAINT_STATUS[nextStatus]?.label ?? humanise(nextStatus)}.` });
+      setSelectedIds([]);
+    },
+    onError: (error) => toast({ title: 'Bulk update failed', description: error.message, tone: 'error' }),
   });
 
   const rows = (complaints.data ?? []).filter((complaint) => {
@@ -892,6 +952,12 @@ function OwnerComplaintRecords() {
     return [complaint.reference, complaint.category, complaint.description, complaint.customer?.name, complaint.customer?.phone]
       .some((value) => String(value ?? '').toLowerCase().includes(needle));
   });
+  const detail = (complaints.data ?? []).find((row) => row.id === searchParams.get('record')) ?? null;
+  const openDetail = (record) => setSearchParams((current) => {
+    const next = new URLSearchParams(current);
+    if (record?.id) next.set('record', record.id); else next.delete('record');
+    return next;
+  }, { replace: true });
 
   const columns = [
     { key: 'reference', header: 'Reference', required: true, cell: (row) => <span className="tabular font-medium">{row.reference}</span> },
@@ -900,8 +966,8 @@ function OwnerComplaintRecords() {
     { key: 'created_at', header: 'Created', cell: (row) => <span className="text-xs">{formatDate(row.created_at)}</span> },
     { key: 'age', header: 'Age', sortValue: (row) => complaintAgeDays(row), cell: (row) => { const days = complaintAgeDays(row); const closed = ['resolved', 'closed'].includes(row.status); return <StatusBadge tone={closed ? 'success' : days >= 3 ? 'destructive' : days >= 1 ? 'warning' : 'info'}>{closed ? 'Closed' : days === 0 ? 'Today' : `${days}d open`}</StatusBadge>; } },
     { key: 'sla', header: 'SLA', cell: (row) => <SlaBadge record={row} entityType="complaint" /> },
-    { key: 'status', header: 'Status', required: true, sortValue: (row) => row.status, cell: (row) => <StatusSelect compact value={row.status} options={COMPLAINT_STATUS} disabled={statusMutation.isPending && statusMutation.variables?.id === row.id} ariaLabel={`Change status for ${row.reference}`} onChange={(nextStatus) => statusMutation.mutate({ id: row.id, status: nextStatus })} /> },
-    { key: 'actions', header: 'Actions', required: true, sortable: false, cell: (row) => <OpenRecordButton onClick={() => setDetail(row)} /> },
+    { key: 'status', header: 'Status', required: true, sortValue: (row) => row.status, cell: (row) => <StatusSelect compact value={row.status} options={COMPLAINT_STATUS} disabled={statusMutation.isPending && statusMutation.variables?.id === row.id} ariaLabel={`Change status for ${row.reference}`} onChange={(nextStatus) => statusMutation.mutate({ id: row.id, status: nextStatus, previousStatus: row.status, reference: row.reference })} /> },
+    { key: 'actions', header: 'Actions', required: true, sortable: false, cell: (row) => <OpenRecordButton onClick={() => openDetail(row)} /> },
   ];
   const tableView = useTableView('joboy.table.owner.complaints', columns);
 
@@ -958,22 +1024,43 @@ function OwnerComplaintRecords() {
             columns={tableView.visibleColumns}
             rows={rows}
             loading={complaints.isLoading}
-            onRowClick={setDetail}
+            onRowClick={openDetail}
             pageSize={15}
             density={tableView.density}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
             emptyTitle="No complaints found"
+            emptyDescription={status !== 'all' || search ? 'Try a broader search or clear the current status filter.' : 'There are no customer complaints in the CRM.'}
+            emptyAction={!search && status === 'all' ? <Button size="sm" onClick={() => window.dispatchEvent(new CustomEvent('joboy:quick-create', { detail: 'complaint' }))}>Log complaint</Button> : null}
             hasFilters={Boolean(search) || status !== 'all'}
             onClearFilters={() => { setSearch(''); setStatus('all'); }}
           />
         </PanelBody>
       </Panel>
+      <RecordBulkActions
+        selectedIds={selectedIds}
+        rows={rows}
+        statusOptions={COMPLAINT_STATUS}
+        pending={bulkMutation.isPending}
+        onApply={(nextStatus) => bulkMutation.mutate(nextStatus)}
+        onClear={() => setSelectedIds([])}
+        exportName="complaints"
+        exportColumns={[
+          { header: 'Reference', value: (row) => row.reference },
+          { header: 'Customer', value: (row) => row.customer?.name ?? row.customer?.phone },
+          { header: 'Category', value: (row) => row.category },
+          { header: 'Status', value: (row) => row.status },
+          { header: 'Created', value: (row) => row.created_at },
+          { header: 'Description', value: (row) => row.description },
+        ]}
+      />
       <RecordDrawer
         record={detail}
         activityEntity="complaint"
         title={detail?.reference ?? 'Complaint details'}
         description="Customer complaint and linked booking information"
-        onClose={() => setDetail(null)}
-        navigation={recordNavigation(rows, detail, setDetail)}
+        onClose={() => openDetail(null)}
+        navigation={recordNavigation(rows, detail, openDetail)}
         actions={detail ? (
           <RecordActionBar label="Complaint actions" error={statusMutation.error?.message} success={statusMutation.isSuccess && statusMutation.variables?.id === detail.id ? 'Complaint status updated' : null}>
             <StatusSelect
@@ -981,7 +1068,7 @@ function OwnerComplaintRecords() {
               options={COMPLAINT_STATUS}
               disabled={statusMutation.isPending && statusMutation.variables?.id === detail.id}
               ariaLabel={`Change status for ${detail.reference}`}
-              onChange={(nextStatus) => statusMutation.mutate({ id: detail.id, status: nextStatus })}
+              onChange={(nextStatus) => statusMutation.mutate({ id: detail.id, status: nextStatus, previousStatus: detail.status, reference: detail.reference })}
             />
             {detail.customer?.phone ? <Button asChild variant="outline" size="sm"><a href={`tel:${detail.customer.phone}`}>Call customer</a></Button> : null}
           </RecordActionBar>
@@ -1015,10 +1102,10 @@ function complaintAgeDays(complaint) {
 
 function OwnerEscalations() {
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState(() => searchParams.get('status') ?? 'all');
-  const [detail, setDetail] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['escalations', 'owner'],
     queryFn: () => listEscalations({}),
@@ -1030,8 +1117,22 @@ function OwnerEscalations() {
     }),
     onSuccess: (updated, variables) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.escalations.all });
-      setDetail((current) => current?.id === variables.id ? { ...current, ...(updated ?? {}), status: variables.status } : current);
+      queryClient.setQueryData(['escalations', 'owner'], (current = []) => current.map((row) => row.id === variables.id ? { ...row, ...(updated ?? {}), status: variables.status } : row));
+      toast({ title: 'Escalation status updated', description: `Case is now ${humanise(variables.status)}.`, action: variables.previousStatus ? { label: 'Undo', onClick: async () => { await updateEscalation(variables.id, { status: variables.previousStatus, resolved_at: variables.previousStatus === 'resolved' ? variables.previousResolvedAt : null }); queryClient.invalidateQueries({ queryKey: queryKeys.escalations.all }); toast({ title: 'Escalation change undone', tone: 'info' }); } } : null });
     },
+    onError: (mutationError) => toast({ title: 'Escalation update failed', description: mutationError.message, tone: 'error' }),
+  });
+  const bulkMutation = useMutation({
+    mutationFn: (nextStatus) => updateEscalationStatuses(selectedIds, {
+      status: nextStatus,
+      resolved_at: nextStatus === 'resolved' ? new Date().toISOString() : null,
+    }),
+    onSuccess: (_updated, nextStatus) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.escalations.all });
+      toast({ title: `${selectedIds.length} escalations updated`, description: `Status changed to ${ESCALATION_STATUS[nextStatus]?.label ?? humanise(nextStatus)}.` });
+      setSelectedIds([]);
+    },
+    onError: (mutationError) => toast({ title: 'Bulk update failed', description: mutationError.message, tone: 'error' }),
   });
 
   const rows = (data ?? []).filter((escalation) => {
@@ -1041,6 +1142,12 @@ function OwnerEscalations() {
     return [escalation.phone, escalation.customer?.name, escalation.reason, escalation.conversation_summary]
       .some((value) => String(value ?? '').toLowerCase().includes(needle));
   });
+  const detail = (data ?? []).find((row) => row.id === searchParams.get('record')) ?? null;
+  const openDetail = (record) => setSearchParams((current) => {
+    const next = new URLSearchParams(current);
+    if (record?.id) next.set('record', record.id); else next.delete('record');
+    return next;
+  }, { replace: true });
 
   const columns = [
     { key: 'customer', header: 'Customer', required: true, sortValue: (row) => row.customer?.name ?? row.phone, cell: (row) => row.customer?.name ?? formatPhone(row.phone) },
@@ -1048,8 +1155,8 @@ function OwnerEscalations() {
     { key: 'reason', header: 'Reason', cell: (row) => <span className="line-clamp-1 max-w-md">{row.reason ?? '—'}</span> },
     { key: 'created_at', header: 'Created', cell: (row) => <span className="text-xs">{formatDateTime(row.created_at)}</span> },
     { key: 'sla', header: 'SLA', cell: (row) => <SlaBadge record={row} entityType="escalation" /> },
-    { key: 'status', header: 'Status', required: true, sortValue: (row) => row.status, cell: (row) => <StatusSelect compact value={row.status} options={ESCALATION_STATUS} disabled={statusMutation.isPending && statusMutation.variables?.id === row.id} ariaLabel={`Change escalation status for ${row.customer?.name ?? row.phone}`} onChange={(nextStatus) => statusMutation.mutate({ id: row.id, status: nextStatus })} /> },
-    { key: 'actions', header: 'Actions', required: true, sortable: false, cell: (row) => <OpenRecordButton onClick={() => setDetail(row)} /> },
+    { key: 'status', header: 'Status', required: true, sortValue: (row) => row.status, cell: (row) => <StatusSelect compact value={row.status} options={ESCALATION_STATUS} disabled={statusMutation.isPending && statusMutation.variables?.id === row.id} ariaLabel={`Change escalation status for ${row.customer?.name ?? row.phone}`} onChange={(nextStatus) => statusMutation.mutate({ id: row.id, status: nextStatus, previousStatus: row.status, previousResolvedAt: row.resolved_at })} /> },
+    { key: 'actions', header: 'Actions', required: true, sortable: false, cell: (row) => <OpenRecordButton onClick={() => openDetail(row)} /> },
   ];
   const tableView = useTableView('joboy.table.owner.escalations', columns);
 
@@ -1105,22 +1212,42 @@ function OwnerEscalations() {
             columns={tableView.visibleColumns}
             rows={rows}
             loading={isLoading}
-            onRowClick={setDetail}
+            onRowClick={openDetail}
             pageSize={15}
             density={tableView.density}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
             emptyTitle="No escalations found"
+            emptyDescription={status !== 'all' || search ? 'Try a broader search or clear the current status filter.' : 'No conversations currently require a human handoff.'}
             hasFilters={Boolean(search) || status !== 'all'}
             onClearFilters={() => { setSearch(''); setStatus('all'); }}
           />
         </PanelBody>
       </Panel>
+      <RecordBulkActions
+        selectedIds={selectedIds}
+        rows={rows}
+        statusOptions={ESCALATION_STATUS}
+        pending={bulkMutation.isPending}
+        onApply={(nextStatus) => bulkMutation.mutate(nextStatus)}
+        onClear={() => setSelectedIds([])}
+        exportName="escalations"
+        exportColumns={[
+          { header: 'Customer', value: (row) => row.customer?.name ?? row.phone },
+          { header: 'Phone', value: (row) => row.phone },
+          { header: 'Reason', value: (row) => row.reason },
+          { header: 'Status', value: (row) => row.status },
+          { header: 'Created', value: (row) => row.created_at },
+          { header: 'Summary', value: (row) => row.conversation_summary },
+        ]}
+      />
       <RecordDrawer
         record={detail}
         activityEntity="escalation"
         title={detail?.customer?.name ?? formatPhone(detail?.phone)}
         description="Escalation context and current handling status"
-        onClose={() => setDetail(null)}
-        navigation={recordNavigation(rows, detail, setDetail)}
+        onClose={() => openDetail(null)}
+        navigation={recordNavigation(rows, detail, openDetail)}
         actions={detail ? (
           <RecordActionBar label="Escalation actions" error={statusMutation.error?.message} success={statusMutation.isSuccess && statusMutation.variables?.id === detail.id ? 'Escalation status updated' : null}>
             <StatusSelect
@@ -1128,7 +1255,7 @@ function OwnerEscalations() {
               options={ESCALATION_STATUS}
               disabled={statusMutation.isPending && statusMutation.variables?.id === detail.id}
               ariaLabel={`Change escalation status for ${detail.customer?.name ?? detail.phone}`}
-              onChange={(nextStatus) => statusMutation.mutate({ id: detail.id, status: nextStatus })}
+              onChange={(nextStatus) => statusMutation.mutate({ id: detail.id, status: nextStatus, previousStatus: detail.status, previousResolvedAt: detail.resolved_at })}
             />
             {detail.phone ? <Button asChild variant="outline" size="sm"><a href={`tel:${detail.phone}`}>Call customer</a></Button> : null}
           </RecordActionBar>
@@ -1147,6 +1274,21 @@ function OwnerEscalations() {
         ] : []}
       />
     </ViewShell>
+  );
+}
+
+function RecordBulkActions({ selectedIds, rows, statusOptions, pending, onApply, onClear, exportName, exportColumns }) {
+  const [nextStatus, setNextStatus] = useState('');
+  const selectedRows = rows.filter((row) => selectedIds.includes(row.id));
+  return (
+    <BulkActionBar count={selectedIds.length} onClear={onClear}>
+      <select value={nextStatus} onChange={(event) => setNextStatus(event.target.value)} className="bg-background h-8 rounded-lg border px-2 text-xs" aria-label="Choose status for selected records">
+        <option value="">Choose status…</option>
+        {Object.entries(statusOptions).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
+      </select>
+      <Button size="sm" disabled={!nextStatus || pending} onClick={() => onApply(nextStatus)}>{pending ? 'Updating…' : 'Apply'}</Button>
+      <Button variant="outline" size="sm" onClick={() => downloadCsv(stamp(exportName), selectedRows, exportColumns)}><Download /> Export</Button>
+    </BulkActionBar>
   );
 }
 

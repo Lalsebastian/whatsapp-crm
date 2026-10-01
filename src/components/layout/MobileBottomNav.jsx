@@ -13,7 +13,7 @@ export function MobileBottomNav() {
       {modules.map((item) => {
         const Icon = item.icon;
         const selected = item.id === active;
-        return <button key={item.id} type="button" aria-current={selected ? 'page' : undefined} onClick={() => navigate(moduleHref(role, item.id))} className={selected ? 'is-active' : ''}><span><Icon /></span><small>{item.label}</small></button>;
+        return <button key={item.id} type="button" aria-label={item.label} aria-current={selected ? 'page' : undefined} onClick={() => navigate(moduleHref(role, item.id))} className={selected ? 'is-active' : ''}><span aria-hidden="true"><Icon /></span><small>{item.label}</small></button>;
       })}
     </nav>
   );

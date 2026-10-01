@@ -224,6 +224,11 @@ export async function updateEscalation(id, patch) {
   return updateRow('escalations', patch, { id });
 }
 
+export async function updateEscalationStatuses(ids, patch) {
+  if (!ids?.length) return [];
+  return updateRows('escalations', patch, { id: ids });
+}
+
 /*
  * Reference data
  */

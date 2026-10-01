@@ -12,7 +12,7 @@ export function BookingWorkflow({ status }) {
     <section className="booking-workflow" aria-label={`Booking workflow: ${meta.label}`}>
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.16em] text-info uppercase dark:text-primary">Service journey</div>
+          <div className="text-[10px] font-bold tracking-[0.14em] text-info uppercase dark:text-primary">Booking progress</div>
           <div className="mt-1 text-sm font-semibold">{exceptional ? meta.label : 'Progress to completion'}</div>
         </div>
         <span className={`workflow-current workflow-current-${meta.tone}`}>{meta.label}</span>

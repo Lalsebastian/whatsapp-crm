@@ -15,12 +15,12 @@ function SheetClose({ ...props }) {
   return <SheetPrimitive.Close data-slot="sheet-close" {...props} />;
 }
 
-function SheetContent({ className, children, side = 'right', ...props }) {
+function SheetContent({ className, overlayClassName, children, side = 'right', ...props }) {
   return (
     <SheetPrimitive.Portal>
       <SheetPrimitive.Overlay
         data-slot="sheet-overlay"
-        className="data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px]"
+        className={cn('data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px]', overlayClassName)}
       />
       <SheetPrimitive.Content
         data-slot="sheet-content"

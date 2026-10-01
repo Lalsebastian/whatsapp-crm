@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 import { Panel, PanelBody } from '@/components/layout/Panel';
-import { Activity, Sparkles } from 'lucide-react';
+import { BriefcaseBusiness, ChartNoAxesCombined } from 'lucide-react';
 
 /*
  * View scaffolding — page frame and the standard chart panel.
@@ -21,8 +21,8 @@ export function ViewShell({ title, description, actions, children, scroll = true
       <header className="view-masthead dream-header flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-[1.4rem] border border-border/60 px-4 py-3.5 md:px-5">
         <div className="view-masthead-orbit" aria-hidden="true" />
         <div className="relative min-w-0">
-          <div className="view-kicker mb-1.5 inline-flex items-center gap-1.5 text-[9px] font-bold tracking-[0.2em] uppercase">
-            <Sparkles className="size-3" /> Joboy intelligence
+          <div className="view-kicker mb-1.5 inline-flex items-center gap-1.5 text-[9px] font-bold tracking-[0.14em] uppercase">
+            <BriefcaseBusiness className="size-3" /> Joboy operations
           </div>
           <h1 className="dream-title text-lg font-semibold tracking-tight md:text-xl">{title}</h1>
           {description ? (
@@ -38,12 +38,12 @@ export function ViewShell({ title, description, actions, children, scroll = true
 }
 
 /** Standard chart panel: title on the left, optional controls on the right. */
-export function ChartPanel({ title, description, actions, children, className, bodyClassName }) {
+export function ChartPanel({ title, description, actions, children, className, bodyClassName, icon: Icon = ChartNoAxesCombined }) {
   return (
     <Panel className={className}>
       <div className="border-border flex shrink-0 items-start justify-between gap-3 border-b px-4 py-3">
         <div className="flex min-w-0 items-start gap-2.5">
-          <span className="chart-panel-glyph mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg"><Activity className="size-3.5" /></span>
+          <span className="chart-panel-glyph mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg"><Icon className="size-3.5" /></span>
           <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{title}</div>
           {description ? (

@@ -85,7 +85,7 @@ export function OwnerControlCentre() {
   const activeTechnicians = data.technicians.filter((row) => row.active !== false).length;
 
   return (
-    <ViewShell title="CRM Control Centre" description="Configure the operating model, guardrails and data behind every customer journey">
+    <ViewShell title="CRM settings" description="Manage services, technicians, customer groups and record quality">
       <section className="control-hero relative overflow-hidden rounded-[1.65rem] border border-primary/15 p-5 md:p-6">
         <div className="control-hero-glow" aria-hidden="true" />
         <div className="relative grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
