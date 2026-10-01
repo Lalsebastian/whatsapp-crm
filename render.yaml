@@ -19,6 +19,12 @@ services:
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ENABLE_CHATBOT_ANALYTICS_DASHBOARD
+        value: "false"
+      - key: CHATBOT_ANALYTICS_SECRET
+        sync: false
       - key: CLIENT_API_BASE_URL
         sync: false
       - key: CLIENT_API_KEY
@@ -32,6 +38,9 @@ services:
     buildCommand: npm run build
     staticPublishPath: ./dist
     pullRequestPreviewsEnabled: true
+    envVars:
+      - key: VITE_CHATBOT_API_BASE_URL
+        sync: false
     routes:
       - type: rewrite
         source: /*

@@ -8,6 +8,7 @@ const webhookRoute = require('./routes/webhook');
 const healthRoute = require('./routes/health');
 const readinessRoute = require('./routes/readiness');
 const chatTestRoute = require('./routes/chatTest');
+const chatbotAnalyticsRoute = require('./routes/chatbotAnalytics');
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use('/ready', readinessRoute);
 // state. The route itself fails closed unless the explicit feature flag and
 // developer secret are both configured.
 app.use('/api/chat/test', chatTestRoute);
+app.use('/api/analytics/chatbot', chatbotAnalyticsRoute);
 
 app.get('/', (req, res) => {
   res.json({
@@ -38,6 +40,7 @@ app.get('/', (req, res) => {
       health: '/health',
       readiness: '/ready',
       ...(chatTestRoute.isTestChatEnabled() ? { chatTest: '/api/chat/test' } : {}),
+      ...(chatbotAnalyticsRoute.isEnabled() ? { chatbotAnalytics: '/api/analytics/chatbot' } : {}),
     },
   });
 });

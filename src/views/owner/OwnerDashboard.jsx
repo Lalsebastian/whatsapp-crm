@@ -60,6 +60,7 @@ import { UtilizationChart } from '@/components/charts/TrendCharts';
 import { OwnerCalendar, OwnerCustomers, TodayCommandCentre } from '@/views/owner/OwnerExperienceViews';
 import { OwnerAuditLog, OwnerDispatch, OwnerReports } from '@/views/owner/OwnerOperationsViews';
 import { OwnerControlCentre } from '@/views/owner/OwnerControlCentre';
+import { ChatbotAnalytics } from '@/views/owner/ChatbotAnalytics';
 import { Button } from '@/components/ui/button';
 import { Panel, PanelBody, PanelHeader, PanelTitle } from '@/components/layout/Panel';
 
@@ -94,6 +95,7 @@ export function OwnerDashboard() {
   if (active === 'calendar') return <OwnerCalendar />;
   if (active === 'customers') return <OwnerCustomers />;
   if (active === 'reports') return <OwnerReports />;
+  if (active === 'chatbot-analytics') return <ChatbotAnalytics />;
   if (active === 'dispatch') return <OwnerDispatch />;
   if (active === 'audit') return <OwnerAuditLog />;
   if (active === 'control') return <OwnerControlCentre />;

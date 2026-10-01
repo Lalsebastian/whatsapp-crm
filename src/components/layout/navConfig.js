@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Bot,
   ChartNoAxesCombined,
   CalendarDays,
   ContactRound,
@@ -27,6 +28,7 @@ export const ROLE_MODULES = {
     { id: 'calendar', label: 'Calendar', description: 'Schedule & agenda', icon: CalendarDays, group: 'Business' },
     { id: 'customers', label: 'Customers', description: '360° profiles', icon: ContactRound, group: 'Business' },
     { id: 'reports', label: 'Reports', description: 'Decision intelligence', icon: ChartNoAxesCombined, group: 'Business' },
+    { id: 'chatbot-analytics', label: 'Chatbot Analytics', description: 'Conversation performance', icon: Bot, group: 'Business' },
     { id: 'bookings', label: 'Bookings', description: 'Service schedule', icon: CalendarDays, group: 'Operations' },
     { id: 'dispatch', label: 'Dispatch', description: 'Capacity & conflicts', icon: MapPinned, group: 'Operations' },
     { id: 'complaints', label: 'Complaints', description: 'Customer care', icon: ClipboardList, group: 'Operations' },

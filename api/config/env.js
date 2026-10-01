@@ -42,6 +42,12 @@ const env = {
   REVIEWS_ENABLED: booleanValue(process.env.REVIEWS_ENABLED),
   PUBLIC_REVIEW_URL: process.env.PUBLIC_REVIEW_URL || '',
   REVIEW_MIN_RATING: Math.min(5, Math.max(1, Number(process.env.REVIEW_MIN_RATING) || 4)),
+
+  // Management analytics is intentionally separate from the public CRM
+  // frontend until real dashboard authentication is available. Both values
+  // are required so the server fails closed by default.
+  ENABLE_CHATBOT_ANALYTICS_DASHBOARD: booleanValue(process.env.ENABLE_CHATBOT_ANALYTICS_DASHBOARD),
+  CHATBOT_ANALYTICS_SECRET: process.env.CHATBOT_ANALYTICS_SECRET || '',
 };
 
 module.exports = env;
