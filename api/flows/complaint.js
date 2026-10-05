@@ -12,6 +12,13 @@ const { classifyComplaintCategory } = require('../ai/intentService');
 const AI_CONFIDENCE = require('../ai/confidence');
 const { randomUUID } = require('node:crypto');
 const { executeOnce } = require('../reliability/actionGuard');
+const { invalidateCustomerProfile } = require('../customer/customerProfileService');
+const { assessSeverity } = require('./complaintSeverity');
+const messageBudget = require('../analytics/messageBudget');
+const { reviewAttachment } = require('./attachments');
+const complaintUpdate = require('./complaintUpdate');
+const { formatDateForCustomer } = require('./dateUtils');
+const { ACTIONS, actionId } = require('./quickActions');
 
 const crm = getCrmAdapter();
 const FLOW = 'complaint';
@@ -82,6 +89,7 @@ const CATEGORIES = [
 const CATEGORY_BY_ID = Object.fromEntries(CATEGORIES.map((category) => [category.id, category]));
 
 async function startComplaint(session, customer, input = {}) {
+  messageBudget.start(session.phone, { initialCustomerMessages: 1 });
   logger.audit('COMPLAINT_STARTED', {
     phone: session.phone,
     sessionId: session.phone,
@@ -90,17 +98,17 @@ async function startComplaint(session, customer, input = {}) {
     source: input.source || (input.buttonId ? 'button' : 'text'),
     result: 'started',
   });
-  let initialContext = withVoiceEvidence(
-    input.source === 'voice' ? { description: input.text && input.text.trim() } : {},
-    input
-  );
-  if (input.source === 'voice' && input.text) {
-    const classification = await classifyComplaintCategory(input.text, {
-      preferredLanguage: session.preferredLanguage,
-    });
-    if (classification.category && classification.confidence >= AI_CONFIDENCE.MEDIUM) {
-      initialContext = { ...initialContext, category: classification.category };
-    }
+  // Keep what the customer already said (typed or spoken) so they never have
+  // to describe the problem twice.
+  const spoken = input.source === 'voice' || Boolean(input.ai);
+  const description = spoken && input.text ? input.text.trim() : undefined;
+  let initialContext = withVoiceEvidence({
+    ...(input.initialContext || {}),
+    ...(description ? { description } : {}),
+  }, input);
+  if (description && !initialContext.category) {
+    const category = await inferCategory(session, description);
+    if (category) initialContext = { ...initialContext, category };
   }
   const bookings = await crm.getBookings(customer.id, { limit: 5 });
 
@@ -112,7 +120,7 @@ async function startComplaint(session, customer, input = {}) {
   const rows = bookings.map((b) => ({
     id: `BKC_${b.id}`,
     title: `${b.reference}`,
-    description: `${b.scheduledDate || ''} — ${b.status}`.slice(0, 72),
+    description: `${formatDateForCustomer(b.scheduledDate)} — ${String(b.status || '').replace(/_/g, ' ')}`.slice(0, 72),
   }));
   rows.push({ id: 'BKC_NONE', title: 'Not related to a booking', description: 'General complaint' });
 
@@ -140,8 +148,76 @@ async function handleSelectBooking(session, customer, input) {
     });
   }
   const context = { ...session.context, bookingId };
+  if (bookingId && await offerExistingComplaint(session, customer, context)) return;
   if (context.category) return continueWithComplaintContext(session, context);
   await promptCategory(session, context);
+}
+
+// One open complaint per booking: if there already is one, adding to it keeps
+// the whole case in one place for the support team.
+async function offerExistingComplaint(session, customer, context) {
+  let existing = null;
+  try {
+    existing = await crm.getOpenComplaintForBooking(customer.id, context.bookingId);
+  } catch (error) {
+    logger.warn('COMPLAINT', 'Open-complaint check unavailable:', error.message);
+  }
+  if (!existing) return false;
+  const status = String(existing.status || 'open').replace(/_/g, ' ');
+  await whatsapp.sendButtons(
+    session.phone,
+    `You already have an open complaint for this booking: ${existing.reference} (${status}). Would you like to add this to it, so our team sees everything in one place?`,
+    [
+      { id: 'DUP_ADD', title: `Add to ${existing.reference}`.slice(0, 20) },
+      { id: 'DUP_NEW', title: 'New Complaint' },
+      { id: 'HUMAN_SUPPORT', title: 'Talk to Support' },
+    ]
+  );
+  await sessionStore.setFlow(session.phone, FLOW, 'duplicate_check', {
+    ...context,
+    duplicateComplaint: { id: existing.id, reference: existing.reference, status: existing.status, customerId: existing.customerId },
+  });
+  logger.audit('COMPLAINT_DUPLICATE_OFFERED', {
+    phone: session.phone,
+    customerId: customer.id,
+    bookingId: context.bookingId,
+    complaintReference: existing.reference,
+    result: 'offered',
+  });
+  return true;
+}
+
+async function handleDuplicateCheck(session, customer, input) {
+  const { duplicateComplaint, ...context } = session.context;
+  if (input.buttonId === 'DUP_ADD' && duplicateComplaint) {
+    return complaintUpdate.startComplaintUpdate(session, customer, duplicateComplaint, {
+      text: context.description,
+      attachments: context.attachments,
+    });
+  }
+  if (input.buttonId === 'DUP_NEW') {
+    if (context.category) return continueWithComplaintContext(session, context);
+    return promptCategory(session, context);
+  }
+  await whatsapp.sendText(session.phone, `Please choose Add to ${duplicateComplaint ? duplicateComplaint.reference : 'Complaint'}, New Complaint, or Talk to Support.`);
+}
+
+/** A complaint that starts from a photo the customer already sent. */
+async function startComplaintWithMedia(session, customer, { bookingId, attachments }) {
+  logger.audit('COMPLAINT_STARTED', {
+    phone: session.phone,
+    sessionId: session.phone,
+    customerId: customer && customer.id,
+    flow: FLOW,
+    source: 'media',
+    result: 'started',
+  });
+  const context = { bookingId: bookingId || null, attachments: attachments || [] };
+  if (bookingId) {
+    if (await offerExistingComplaint(session, customer, context)) return;
+    return promptCategory(session, context);
+  }
+  return startComplaint(session, customer, { initialContext: context });
 }
 
 async function continueWithComplaintContext(session, context) {
@@ -162,21 +238,44 @@ async function startComplaintFromFeedback(session, customer, input) {
   return continueWithComplaintContext(session, context);
 }
 
+// Clear wording maps to a category without an AI call.
+const CATEGORY_RULES = [
+  ['property_damage', /\b(?:damag\w*|scratch\w*|cracked|broke (?:my|the)|stain\w* (?:on|my))\b/i],
+  ['payment_issue', /\b(?:refund|overcharg\w*|charged (?:twice|double|extra)|billing|invoice|payment)\b/i],
+  ['technician_delayed', /\b(?:late|delay\w*|didn'?t come|did not come|no show|never came|not arrived|kept waiting)\b/i],
+  ['technician_behaviour', /\b(?:rude|behaviou?r|unprofessional|attitude|misbehav\w*|shout\w*)\b/i],
+  ['problem_returned', /\b(?:again|same (?:problem|issue)|came back|returned|still (?:not working|leaking|broken|dripping|not cooling)|not fixed)\b/i],
+  ['service_not_completed', /\b(?:not (?:finished|completed)|didn'?t finish|did not finish|incomplete|half done|left without)\b/i],
+];
+
+function ruleCategory(text) {
+  const found = CATEGORY_RULES.find(([, pattern]) => pattern.test(String(text || '')));
+  return found ? found[0] : null;
+}
+
+/** Category from the customer's words: rules first, AI only for unclear text. */
+async function inferCategory(session, text) {
+  const value = String(text || '').trim();
+  if (!value) return null;
+  const byRule = ruleCategory(value);
+  if (byRule) return byRule;
+  if (value.split(/\s+/).length < 3) return null;
+  const classification = await classifyComplaintCategory(value, { preferredLanguage: session.preferredLanguage });
+  return classification.category && classification.confidence >= AI_CONFIDENCE.MEDIUM ? classification.category : null;
+}
+
 async function startComplaintForBooking(session, customer, input) {
   const context = {
     bookingId: input.bookingId,
     category: CATEGORY_BY_ID[input.category] ? input.category : undefined,
     description: input.description || undefined,
     voiceNotes: input.voice ? [input.voice] : [],
+    attachments: input.attachments || [],
   };
-  if (input.description) {
-    const classification = await classifyComplaintCategory(input.description, {
-      preferredLanguage: session.preferredLanguage,
-    });
-    if (classification.category && classification.confidence >= AI_CONFIDENCE.MEDIUM) {
-      context.category = classification.category;
-    }
+  if (!context.category && input.description) {
+    context.category = await inferCategory(session, input.description) || undefined;
   }
+  if (context.bookingId && await offerExistingComplaint(session, customer, context)) return;
   return continueWithComplaintContext(session, context);
 }
 
@@ -254,10 +353,25 @@ async function promptMedia(session, context) {
 }
 
 async function handleAwaitingMedia(session, customer, input) {
-  if (input.mediaId && ['image', 'video'].includes(input.mediaType)) {
+  if (input.mediaId && ['image', 'video', 'document'].includes(input.mediaType)) {
+    const review = await reviewAttachment(session, input, { issue: session.context.description });
+    if (!review.attach) {
+      await whatsapp.sendButtons(session.phone, review.reply, [{ id: 'MEDIA_DONE', title: 'Skip / Done' }]);
+      logger.audit('COMPLAINT_MEDIA_REJECTED', {
+        phone: session.phone,
+        customerId: customer && customer.id,
+        flow: FLOW,
+        reason: review.review && review.review.containsSensitiveDocument ? 'sensitive_document' : 'unrelated',
+        result: 'rejected',
+      });
+      return;
+    }
     const attachments = [...(session.context.attachments || []), { waMediaId: input.mediaId, mediaType: input.mediaType }];
     const received = attachments.length === 1 ? 'the attachment' : `${attachments.length} attachments`;
-    await whatsapp.sendText(session.phone, `Thank you, I've received ${received}. You can send another one if needed, or select Skip / Done to continue.`);
+    const lead = review.reply || `Thank you, I've received ${received}.`;
+    await whatsapp.sendButtons(session.phone, `${lead} You can send another one if needed, or select Skip / Done to continue.`, [
+      { id: 'MEDIA_DONE', title: 'Skip / Done' },
+    ]);
     await sessionStore.setFlow(session.phone, FLOW, 'awaiting_media', { ...session.context, attachments });
     logger.audit('COMPLAINT_MEDIA_RECEIVED', {
       phone: session.phone,
@@ -326,6 +440,11 @@ async function handleConfirm(session, customer, input) {
     return;
   }
 
+  const severity = assessSeverity({
+    category,
+    description,
+    openComplaintCount: ((customer.profile && customer.profile.activeComplaints) || []).length,
+  });
   const submissionNonce = session.context.submissionNonce || randomUUID();
   session.context.submissionNonce = submissionNonce;
   const actionKey = `complaint:${customer.id}:${submissionNonce}`;
@@ -344,6 +463,7 @@ async function handleConfirm(session, customer, input) {
         bookingId: bookingId || undefined,
         category,
         description,
+        priority: severity.priority,
         attachments,
       }));
     complaint = outcome.value;
@@ -444,8 +564,30 @@ async function handleConfirm(session, customer, input) {
     return;
   }
 
+  invalidateCustomerProfile(customer.id);
+  const cost = messageBudget.complete(session.phone);
+  logger.audit('COMPLAINT_COST_SUMMARY', {
+    phone: session.phone,
+    customerId: customer.id,
+    complaintId: complaint.id,
+    botMessages: cost.botMessages,
+    templateMessages: cost.templateMessages,
+    aiCalls: cost.aiCalls,
+    aiCallsAvoided: cost.aiCallsAvoided,
+    estimatedCost: cost.estimatedCost,
+    currency: cost.currency,
+    result: 'completed',
+  });
+  logger.audit('COMPLAINT_SEVERITY_ASSESSED', {
+    phone: session.phone,
+    customerId: customer.id,
+    complaintReference: complaint.reference,
+    severity: severity.level,
+    priority: severity.priority,
+    result: severity.escalate ? 'escalated' : 'standard',
+  });
   let priorityReview = false;
-  const trigger = evaluateTriggers({ category, text: description || '' });
+  const trigger = severity.escalate ? { escalate: true, reason: severity.reason } : evaluateTriggers({ category, text: description || '' });
   if (trigger.escalate) {
     try {
       await triggerEscalation({
@@ -473,23 +615,36 @@ async function handleConfirm(session, customer, input) {
     }
   }
 
-  if (!priorityReview) await sessionStore.clearFlow(session.phone);
-  const priorityLine = priorityReview
-    ? "\n\nI've also shared your complaint and the details you've provided with our support team. You won't need to repeat everything when they take over."
-    : '';
-  await whatsapp.sendText(
+  const registered = `Thank you. I've registered your complaint with our support team.\n\nReference: *${complaint.reference}*`;
+  if (priorityReview) {
+    // A person takes over now; no bot quick replies that would compete with them.
+    const urgency = severity.priority === 'urgent' ? 'urgent' : 'high priority';
+    await whatsapp.sendText(
+      session.phone,
+      `${registered}\n\nI've marked it as ${urgency} and shared everything you've told me with our support team, so you won't need to repeat it. A team member will continue with you here.`
+    );
+    return;
+  }
+  await sessionStore.clearFlow(session.phone);
+  await whatsapp.sendButtons(
     session.phone,
-    `Thank you. I've registered your complaint with our support team.\n\nReference: *${complaint.reference}*\n\nOur team will review the issue and follow up with you shortly. You can also check the complaint status at any time from the main menu.${priorityLine}`
+    `${registered}\n\nOur team will review it and follow up with you here. You can check its status at any time.`,
+    [
+      { id: actionId(ACTIONS.COMPLAINT_STATUS, complaint.id), title: 'Complaint Status' },
+      { id: 'MAIN_MENU', title: 'Main Menu' },
+    ]
   );
 }
 
 module.exports = {
   startComplaint,
+  startComplaintWithMedia,
   startComplaintFromFeedback,
   startComplaintForBooking,
   steps: {
     select_booking: handleSelectBooking,
     select_category: handleSelectCategory,
+    duplicate_check: handleDuplicateCheck,
     awaiting_details: handleAwaitingDetails,
     awaiting_media: handleAwaitingMedia,
     confirm: handleConfirm,

@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import {
   BreakdownDonut, ComparisonTrendChart, ConversationTrendChart,
-} from '@/components/charts/ChatbotAnalyticsCharts';
+} from '@/components/charts/LazyCharts';
 import {
   clearChatbotAnalyticsAccessKey,
   fetchChatbotAnalytics,
@@ -191,6 +191,8 @@ function AnalyticsContent({ data }) {
         ]} footer={<BreakdownGroup title="Detected languages" items={data.voice.languages} />} />
       </div>
 
+      {data.cost ? <CostPanel cost={data.cost} /> : null}
+
       <div className="grid gap-4 xl:grid-cols-12">
         <ChartPanel title="AI requests and fallback" description="Understanding load and deterministic recovery" className="xl:col-span-8"><ComparisonTrendChart data={data.ai.trend} /></ChartPanel>
         <AnalyticsStatPanel className="xl:col-span-4" title="AI performance" rows={[
@@ -208,6 +210,43 @@ function AnalyticsContent({ data }) {
         <LatencyTable latency={data.latency} />
       </ChartPanel>
     </>
+  );
+}
+
+function formatCost(value, currency) {
+  if (value == null || !Number.isFinite(Number(value))) return '—';
+  return `${currency} ${Number(value).toFixed(Number(value) < 1 ? 4 : 2)}`;
+}
+
+function formatAverage(value) {
+  return value == null || !Number.isFinite(Number(value)) ? '—' : Number(value).toFixed(1);
+}
+
+// Message and AI cost per completed booking/complaint, from the backend's
+// estimates (rates configured in api/config/costs.js).
+function CostPanel({ cost }) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-3">
+      <AnalyticsStatPanel title="Cost per booking" rows={[
+        ['Bookings measured', cost.bookingsMeasured],
+        ['Bot messages per booking', formatAverage(cost.averageBotMessagesPerBooking)],
+        ['AI calls per booking', formatAverage(cost.averageAiCallsPerBooking)],
+        ['Estimated cost per booking', formatCost(cost.averageCostPerBooking, cost.currency)],
+      ]} />
+      <AnalyticsStatPanel title="Cost per complaint" rows={[
+        ['Complaints measured', cost.complaintsMeasured],
+        ['Bot messages per complaint', formatAverage(cost.averageBotMessagesPerComplaint)],
+        ['AI calls per complaint', formatAverage(cost.averageAiCallsPerComplaint)],
+        ['Estimated cost per complaint', formatCost(cost.averageCostPerComplaint, cost.currency)],
+      ]} />
+      <AnalyticsStatPanel title="Savings" rows={[
+        ['Questions skipped by fast paths', cost.messagesSavedByFastPath],
+        ['AI calls avoided', cost.aiCallsAvoided],
+        ['AI avoidance rate', formatPercent(cost.aiAvoidanceRate)],
+        ['Template messages sent', cost.templateMessages],
+        ['Estimated total cost', formatCost(cost.totalEstimatedCost, cost.currency)],
+      ]} />
+    </div>
   );
 }
 

@@ -70,4 +70,36 @@ async function patch(table, query, data) {
   return res.data;
 }
 
-module.exports = { get, insert, upsert, patch };
+async function remove(table, query, { returnRepresentation = false } = {}) {
+  if (!query) throw new Error(`Refusing to DELETE from ${table} without a filter`);
+  const res = await run('delete', buildUrl(table, query), undefined, {
+    headers: headers({ Prefer: returnRepresentation ? 'return=representation' : 'return=minimal' }),
+  });
+  return res.data;
+}
+
+// Calls a Postgres function exposed by PostgREST (POST /rest/v1/rpc/<fn>).
+// Used where a single round trip must be atomic: multi-service booking,
+// distributed lease locks, idempotency claims and retention cleanup.
+async function rpc(fn, args = {}) {
+  const res = await run('post', `${env.SUPABASE_URL}/rest/v1/rpc/${fn}`, args, {
+    headers: headers({ 'Content-Type': 'application/json' }),
+  });
+  return res.data;
+}
+
+// PostgREST answers PGRST202 (HTTP 404) when the function has not been
+// created yet, i.e. the migration that defines it was never applied.
+function isMissingFunction(error) {
+  const data = error && error.response && error.response.data;
+  return !!data && (data.code === 'PGRST202' || data.code === '42883');
+}
+
+// PGRST204: a column in the payload is not in the schema cache (an additive
+// migration that adds the column has not been applied yet).
+function isMissingColumn(error) {
+  const data = error && error.response && error.response.data;
+  return !!data && (data.code === 'PGRST204' || data.code === '42703');
+}
+
+module.exports = { get, insert, upsert, patch, remove, rpc, isMissingFunction, isMissingColumn };

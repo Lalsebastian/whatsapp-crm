@@ -1,5 +1,7 @@
 const voiceConfig = require('../config/voice');
 const { callGeminiAudio } = require('../ai/providers/geminiProvider');
+const messageBudget = require('../analytics/messageBudget');
+const { getRequestContext } = require('../reliability/requestContext');
 
 const MIME_ALIASES = Object.freeze({
   'audio/x-wav': 'audio/wav',
@@ -70,6 +72,7 @@ Return JSON only with this exact shape:
 {"text":"verbatim transcript","detectedLanguage":"BCP-47 code or short language label","confidence":0.0}
 Confidence must represent speech intelligibility and transcription certainty from 0 to 1. Do not translate, summarize, answer, or add commentary.`;
 
+  messageBudget.aiCall(getRequestContext().phone);
   const raw = await callGeminiAudio({ buffer, mimeType: normalizedMimeType, prompt });
   const parsed = parseJson(raw);
   const text = parsed && typeof parsed.text === 'string' ? parsed.text.trim() : '';

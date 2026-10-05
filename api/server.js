@@ -1,58 +1,29 @@
-const express = require('express');
-const cors = require('cors');
 const axios = require('axios');
 const env = require('./config/env');
 const logger = require('./utils/logger');
-
-const webhookRoute = require('./routes/webhook');
-const healthRoute = require('./routes/health');
-const readinessRoute = require('./routes/readiness');
+const { createApp } = require('./app');
 const chatTestRoute = require('./routes/chatTest');
-const chatbotAnalyticsRoute = require('./routes/chatbotAnalytics');
+const retentionScheduler = require('./privacy/retentionScheduler');
+const escalationSla = require('./escalation/slaMonitor');
 
-const app = express();
+if (env.CRM_PROVIDER === 'http') {
+  try {
+    require('./crm/httpCrmAdapter').validateConfiguration();
+  } catch (error) {
+    // Refuse to start rather than answer customers with errors.
+    logger.error('SERVER', `Client CRM configuration invalid: ${error.message}`);
+    process.exit(1);
+  }
+}
 
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static('public'));
+const app = createApp();
 
-app.use((req, res, next) => {
-  logger.log('HTTP', `${req.method} ${req.path}`);
-  next();
-});
-
-app.use('/webhook', webhookRoute);
-app.use('/health', healthRoute);
-app.use('/ready', readinessRoute);
-
-// Always mount the route so the browser console can report a clear disabled
-// state. The route itself fails closed unless the explicit feature flag and
-// developer secret are both configured.
-app.use('/api/chat/test', chatTestRoute);
-app.use('/api/analytics/chatbot', chatbotAnalyticsRoute);
-
-app.get('/', (req, res) => {
-  res.json({
-    message: 'Home Services WhatsApp Chatbot API',
-    endpoints: {
-      webhook: '/webhook',
-      health: '/health',
-      readiness: '/ready',
-      ...(chatTestRoute.isTestChatEnabled() ? { chatTest: '/api/chat/test' } : {}),
-      ...(chatbotAnalyticsRoute.isEnabled() ? { chatbotAnalytics: '/api/analytics/chatbot' } : {}),
-    },
-  });
-});
-
-app.use((err, req, res, next) => {
-  logger.error('HTTP', 'Unhandled error:', err.message, err.stack);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-app.use((req, res) => {
-  res.status(404).json({ error: 'Not found' });
-});
+if (env.NODE_ENV === 'production' && !env.WHATSAPP_APP_SECRET) {
+  logger.error(
+    'SERVER',
+    'WHATSAPP_APP_SECRET is not set. Webhook deliveries will be rejected (503) until it is configured.'
+  );
+}
 
 app.listen(env.PORT, () => {
   logger.log('SERVER', `Running on port ${env.PORT}`);
@@ -66,11 +37,14 @@ app.listen(env.PORT, () => {
   );
 });
 
+retentionScheduler.start();
+escalationSla.start();
+
 // Keep-alive: ping self every 4 minutes to prevent Render free-tier spin-down.
-// Render sets RENDER_EXTERNAL_URL automatically; falls back to the URL this
-// project has historically deployed to.
-const SELF_URL = process.env.RENDER_EXTERNAL_URL || 'https://whatsapp-bot-95ry.onrender.com';
-if (env.NODE_ENV === 'production') {
+// Render sets RENDER_EXTERNAL_URL automatically. Nothing is pinged when it is
+// absent, so a self-hosted or local production run never calls another host.
+const SELF_URL = process.env.RENDER_EXTERNAL_URL;
+if (env.NODE_ENV === 'production' && SELF_URL) {
   setInterval(async () => {
     try {
       await axios.get(`${SELF_URL}/health`);

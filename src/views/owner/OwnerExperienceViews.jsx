@@ -19,14 +19,13 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock3,
-  ContactRound,
   MessageSquareWarning,
   Receipt,
   UsersRound,
 } from 'lucide-react';
 import { listBookings, listComplaints, listCustomers, listEscalations, listRecentMessages, queryKeys, updateBooking, updateCustomer } from '@/lib/api';
 import { BOOKING_STATUS, complaintStatus } from '@/lib/status';
-import { formatCurrency, formatDate, formatDateTime, formatNumber, formatPhone } from '@/lib/utils';
+import { formatCurrency, formatDate, formatDateTime, formatNumber, formatPhone, localDateKey } from '@/lib/utils';
 import { ViewShell } from '@/components/layout/ViewShell';
 import { Panel, PanelBody, PanelHeader, PanelTitle } from '@/components/layout/Panel';
 import { DataTable } from '@/components/data/DataTable';
@@ -48,7 +47,7 @@ export function TodayCommandCentre({ onNavigate }) {
   const bookings = useQuery({ queryKey: ['bookings', 'owner-records'], queryFn: () => listBookings({}) });
   const complaints = useQuery({ queryKey: ['complaints', 'owner-records'], queryFn: () => listComplaints({}) });
   const escalations = useQuery({ queryKey: ['escalations', 'owner'], queryFn: () => listEscalations({}) });
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateKey();
   const todayBookings = (bookings.data ?? []).filter((item) => item.scheduled_date === today);
   const overdue = (bookings.data ?? []).filter(
     (item) => item.scheduled_date && item.scheduled_date < today && ACTIVE_BOOKING_STATUSES.includes(item.status)
@@ -331,7 +330,7 @@ function CustomerMetric({ label, value, icon: Icon }) {
 function CustomerIntelligence({ customer, mutation }) {
   const [notes, setNotes] = useState(customer.internal_notes ?? '');
   const [tags, setTags] = useState((customer.tags ?? []).join(', '));
-  const upcoming = customer.bookings.filter((item) => item.scheduled_date >= new Date().toISOString().slice(0, 10) && !['completed', 'cancelled'].includes(item.status));
+  const upcoming = customer.bookings.filter((item) => item.scheduled_date >= localDateKey() && !['completed', 'cancelled'].includes(item.status));
   const completed = customer.bookings.filter((item) => item.status === 'completed');
   const avgValue = completed.length ? customer.lifetimeValue / completed.length : 0;
   const supportsProfileFields = Object.prototype.hasOwnProperty.call(customer, 'tags') || Object.prototype.hasOwnProperty.call(customer, 'internal_notes');

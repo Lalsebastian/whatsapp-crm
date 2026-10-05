@@ -52,6 +52,7 @@ describe('human takeover', () => {
     sessionStore.getOrCreateSession.mockResolvedValue({
       phone: '971500', currentFlow: null, currentStep: null, context: {}, humanTakeover: true, customerId: 'cust1',
     });
+    db.get.mockResolvedValue([{ id: 'esc-1', created_at: new Date(Date.now() - 3600000).toISOString() }]);
 
     const result = await handleInboundMessage({ from: '971500', type: 'text', text: 'hello', waMessageId: 'wamid-1' });
 
@@ -128,5 +129,46 @@ describe('human takeover', () => {
     expect(result).toMatchObject({ handoff: false, priority: null, reply: 'escalation_failed' });
     expect(whatsapp.sendText.mock.calls.at(-1)[1]).toContain("wasn't able to connect");
     expect(sessionStore.clearFlow).not.toHaveBeenCalled();
+  });
+
+  describe('handing the conversation back to the bot', () => {
+    const takenOver = (context = {}) => ({
+      phone: '971500', currentFlow: null, currentStep: null, context, humanTakeover: true, customerId: 'cust1',
+      lastActivityAt: new Date().toISOString(),
+    });
+    const released = () => sessionStore.updateSession.mock.calls.some(([, patch]) => patch.humanTakeover === false);
+
+    it('releases once the escalation has been resolved, and replies normally', async () => {
+      sessionStore.getOrCreateSession.mockResolvedValue(takenOver());
+      db.get.mockResolvedValue([]);
+      const result = await handleInboundMessage({ from: '971500', type: 'text', text: 'hi', waMessageId: 'wamid-r1' });
+      expect(released()).toBe(true);
+      expect(result.humanTakeover).not.toBe(true);
+      expect(whatsapp.sendButtons).toHaveBeenCalled();
+    });
+
+    it('releases a takeover nobody closed after HUMAN_TAKEOVER_MAX_HOURS (escalation stays open)', async () => {
+      sessionStore.getOrCreateSession.mockResolvedValue(takenOver());
+      db.get.mockResolvedValue([{ id: 'esc-old', created_at: new Date(Date.now() - 4 * 86400000).toISOString() }]);
+      await handleInboundMessage({ from: '971500', type: 'text', text: 'hello', waMessageId: 'wamid-r2' });
+      expect(released()).toBe(true);
+      expect(db.patch).not.toHaveBeenCalledWith('escalations', expect.anything(), expect.anything());
+    });
+
+    it('releases when the customer asks for the menu', async () => {
+      sessionStore.getOrCreateSession.mockResolvedValue(takenOver());
+      db.get.mockResolvedValue([{ id: 'esc-1', created_at: new Date().toISOString() }]);
+      await handleInboundMessage({ from: '971500', type: 'text', text: 'Menu', waMessageId: 'wamid-r3' });
+      expect(released()).toBe(true);
+      expect(whatsapp.sendButtons).toHaveBeenCalled();
+    });
+
+    it('keeps the takeover when the escalation cannot be checked', async () => {
+      sessionStore.getOrCreateSession.mockResolvedValue(takenOver());
+      db.get.mockRejectedValue(new Error('network'));
+      const result = await handleInboundMessage({ from: '971500', type: 'text', text: 'hello', waMessageId: 'wamid-r4' });
+      expect(released()).toBe(false);
+      expect(result.humanTakeover).toBe(true);
+    });
   });
 });

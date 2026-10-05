@@ -14,6 +14,7 @@ const analytics = require('../analytics/eventWriter');
 const messageBudget = require('../analytics/messageBudget');
 const feedback = require('../flows/feedback');
 const { getCrmAdapter } = require('../crm');
+const { runWithScenario, describeScenarios, SCENARIOS } = require('../simulation/scenarios');
 
 const crm = getCrmAdapter();
 
@@ -52,6 +53,12 @@ function requireTestChatAccess(req, res, next) {
 router.get('/status', (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({ enabled: isTestChatEnabled(), requiresSecret: true });
+});
+
+// Simulation presets for the console (see simulation/scenarios.js).
+router.get('/scenarios', requireTestChatAccess, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ scenarios: describeScenarios() });
 });
 
 router.post('/reset', requireTestChatAccess, async (req, res) => {
@@ -149,7 +156,10 @@ router.post('/start-feedback', requireTestChatAccess, async (req, res) => {
 });
 
 router.post('/', requireTestChatAccess, async (req, res) => {
-  const { phone, message, buttonId, voiceTranscript, voiceLanguage } = req.body || {};
+  const { phone, message, buttonId, voiceTranscript, voiceLanguage, scenario } = req.body || {};
+  if (scenario && !SCENARIOS[scenario]) {
+    return res.status(400).json({ error: `Unknown scenario "${scenario}".` });
+  }
   if (!phone || (!message && !buttonId && !voiceTranscript)) {
     return res.status(400).json({ error: 'Request body must include "phone" and a "message", "buttonId", or simulated "voiceTranscript".' });
   }
@@ -179,7 +189,7 @@ router.post('/', requireTestChatAccess, async (req, res) => {
       inbound = { from: phone, type: 'text', text: String(message) };
     }
 
-    const { result, messages } = await testChannel.withCapture(() => handleInboundMessage(inbound));
+    const { result, messages } = await testChannel.withCapture(() => runWithScenario(scenario, () => handleInboundMessage(inbound)));
 
     res.json(responsePayload(result, messages));
   } catch (err) {

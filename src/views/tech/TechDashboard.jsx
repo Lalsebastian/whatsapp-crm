@@ -5,7 +5,7 @@ import { useModule } from '@/hooks/useModule';
 import { useLiveUpdates } from '@/hooks/useRealtime';
 import { addJobSignature, listJobPhotos, listJobSignatures, listTechnicianJobs, listTechnicians, updateJobStatus } from '@/lib/api/technicians';
 import { photoUrl, uploadJobPhoto } from '@/lib/api/storage';
-import { formatDate, formatDateTime, formatPhone } from '@/lib/utils';
+import { formatDate, formatDateTime, formatPhone, localDateKey } from '@/lib/utils';
 import { jobStatus } from '@/lib/status';
 import { ViewShell } from '@/components/layout/ViewShell';
 import { Panel, PanelBody, PanelHeader, PanelTitle } from '@/components/layout/Panel';
@@ -149,5 +149,5 @@ function TechnicianProfile({ technician, action }) {
 
 function ProfileField({ label, value }) { return <div className="bg-muted/45 rounded-xl p-3"><div className="text-muted-foreground text-xs">{label}</div><div className="mt-1 text-sm font-medium">{value}</div></div>; }
 function formatAddress(property) { return property ? [property.label, property.address_line, property.area, property.city].filter(Boolean).join(', ') : 'Address not provided'; }
-function dateKey(offset) { const date = new Date(); date.setDate(date.getDate() + offset); return date.toISOString().slice(0, 10); }
+function dateKey(offset) { return localDateKey(new Date(), offset); }
 function minutesToTime(value) { const minutes = Number(value); return Number.isFinite(minutes) ? `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}` : '—'; }

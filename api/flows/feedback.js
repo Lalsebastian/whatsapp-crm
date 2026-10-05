@@ -66,23 +66,42 @@ async function preserveDebugAndFinish(session, details) {
   });
 }
 
-async function promptRating(session, customer, booking, service, initialComment) {
+const RATING_BUTTONS = [
+  { id: 'RATING_5', title: 'Excellent' },
+  { id: 'RATING_4', title: 'Good' },
+  { id: 'RATING_MORE', title: 'More Ratings' },
+];
+
+/**
+ * @param {object} [options]
+ * @param {(prompt: {body: string, buttons: object[], customerName: string, serviceName: string}) => Promise<{delivered: boolean, reason?: string}|void>} [options.deliver]
+ *   Custom delivery (e.g. template outside the 24-hour window). Defaults to
+ *   interactive buttons in the current conversation.
+ * @param {number} [options.flowTtlMinutes] keep the request answerable this long
+ */
+async function promptRating(session, customer, booking, service, initialComment, options = {}) {
   const name = customer && customer.name ? ` ${customer.name}` : '';
   const serviceName = service && service.name ? service.name : 'recent';
-  await whatsapp.sendButtons(
-    session.phone,
-    `Hi${name}, I hope everything went smoothly with your ${serviceName} service.\n\nHow would you rate your experience?`,
-    [
-      { id: 'RATING_5', title: 'Excellent' },
-      { id: 'RATING_4', title: 'Good' },
-      { id: 'RATING_MORE', title: 'More Ratings' },
-    ]
-  );
+  const body = `Hi${name}, I hope everything went smoothly with your ${serviceName} service.\n\nHow would you rate your experience?`;
+  if (options.deliver) {
+    const outcome = await options.deliver({
+      body,
+      buttons: RATING_BUTTONS,
+      customerName: (customer && customer.name) || '',
+      serviceName: (service && service.name) || '',
+    });
+    if (outcome && outcome.delivered === false) {
+      return { started: false, reason: outcome.reason || 'not_delivered', booking };
+    }
+  } else {
+    await whatsapp.sendButtons(session.phone, body, RATING_BUTTONS);
+  }
   await sessionStore.setFlow(session.phone, FLOW, 'select_rating', {
     booking,
     service: service || null,
     preRatingComment: initialComment || undefined,
     requestNonce: randomUUID(),
+    ...(options.flowTtlMinutes ? { flowTtlMinutes: options.flowTtlMinutes } : {}),
   });
   logger.audit('FEEDBACK_REQUESTED', {
     phone: session.phone,
@@ -95,7 +114,7 @@ async function promptRating(session, customer, booking, service, initialComment)
   return { started: true, booking };
 }
 
-async function startFeedbackForBooking({ session, customer, customerId, bookingId, allowUnverifiedCompletion = false, initialComment }) {
+async function startFeedbackForBooking({ session, customer, customerId, bookingId, allowUnverifiedCompletion = false, initialComment, deliver, flowTtlMinutes }) {
   const resolvedCustomerId = customerId || (customer && customer.id);
   if (!session || !resolvedCustomerId || !bookingId) throw new Error('session, customerId, and bookingId are required');
   const booking = await crm.getBookingById(bookingId);
@@ -118,7 +137,7 @@ async function startFeedbackForBooking({ session, customer, customerId, bookingI
     return { started: false, reason: 'duplicate_feedback', feedback: existing };
   }
   const service = booking.serviceId ? await crm.getServiceDetails(booking.serviceId) : null;
-  return promptRating(session, customer || { id: resolvedCustomerId }, booking, service, initialComment);
+  return promptRating(session, customer || { id: resolvedCustomerId }, booking, service, initialComment, { deliver, flowTtlMinutes });
 }
 
 async function startFeedback(session, customer, input = {}) {
@@ -414,11 +433,14 @@ async function handleLowRatingFollowup(session, customer, input) {
   await whatsapp.sendText(session.phone, 'Please select Submit Complaint, Talk to Support, or No, Thanks.');
 }
 
-async function onBookingCompleted({ session, customer, booking }) {
+// Entry point for a CRM completion event (see lifecycle/bookingLifecycle.js).
+// startFeedbackForBooking re-reads the booking from the CRM and requires
+// status=completed there too, so an event alone never starts feedback.
+async function onBookingCompleted({ session, customer, booking, deliver, flowTtlMinutes }) {
   if (!booking || String(booking.status || '').toLowerCase() !== 'completed') {
     return { started: false, reason: 'not_completed' };
   }
-  return startFeedbackForBooking({ session, customer, bookingId: booking.id });
+  return startFeedbackForBooking({ session, customer, bookingId: booking.id, deliver, flowTtlMinutes });
 }
 
 module.exports = {

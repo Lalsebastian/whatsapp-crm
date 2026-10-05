@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { initialRole, roleHome } from '../../src/lib/roles.js';
 import { normaliseTheme, resolveTheme, toggledTheme } from '../../src/lib/theme-utils.js';

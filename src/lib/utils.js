@@ -19,6 +19,17 @@ const AED = new Intl.NumberFormat('en-AE', {
   maximumFractionDigits: 0,
 });
 
+/**
+ * Local calendar date as YYYY-MM-DD, `offsetDays` from `date`. Use this for
+ * "today" comparisons against scheduled_date: toISOString() returns the UTC
+ * date, which in Dubai is still yesterday until 04:00.
+ */
+export function localDateKey(date = new Date(), offsetDays = 0) {
+  const day = new Date(date);
+  day.setDate(day.getDate() + offsetDays);
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+}
+
 export function formatCurrency(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '—';

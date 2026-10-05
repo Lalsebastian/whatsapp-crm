@@ -34,3 +34,10 @@ api/.env.*
 *.sw?
 
 .vercel
+
+# Test output
+coverage
+api/coverage
+playwright-report
+test-results
+blob-report

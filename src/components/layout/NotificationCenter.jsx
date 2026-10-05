@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { listBookings, listComplaints, listEscalations } from '@/lib/api';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { moduleHref } from '@/components/layout/navConfig';
-import { formatDate, formatPhone } from '@/lib/utils';
+import { formatDate, formatPhone, localDateKey } from '@/lib/utils';
 import { slaState } from '@/lib/sla';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -41,7 +41,7 @@ export function NotificationCenter() {
 
   const items = useMemo(() => {
     if (!notifications.data) return [];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateKey();
     const escalationItems = notifications.data.escalations
       .filter((item) => item.status !== 'resolved')
       .map((item) => ({

@@ -247,6 +247,29 @@ function aggregateChatbotAnalytics(events = [], services = [], options = {}) {
     fastPathBookingRate: safeRatio(fastPathBookings, bookingMessageEvents.length),
   };
 
+  // Message-cost analytics (see analytics/messageBudget.js and config/costs.js).
+  const bookingCosts = scoped.filter((event) => event.event_type === 'BOOKING_COST_SUMMARY').map(metadata);
+  const complaintCosts = scoped.filter((event) => event.event_type === 'COMPLAINT_COST_SUMMARY').map(metadata);
+  const sum = (rows, key) => rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
+  const aiCallsAvoided = count('AI_CALL_AVOIDED');
+  const cost = {
+    currency: (bookingCosts[0] && bookingCosts[0].currency) || (complaintCosts[0] && complaintCosts[0].currency) || 'USD',
+    bookingsMeasured: bookingCosts.length,
+    complaintsMeasured: complaintCosts.length,
+    averageBotMessagesPerBooking: average(bookingCosts.map((row) => row.botMessages)),
+    averageBotMessagesPerComplaint: average(complaintCosts.map((row) => row.botMessages)),
+    averageAiCallsPerBooking: average(bookingCosts.map((row) => row.aiCalls)),
+    averageAiCallsPerComplaint: average(complaintCosts.map((row) => row.aiCalls)),
+    averageCostPerBooking: average(bookingCosts.map((row) => row.estimatedCost)),
+    averageCostPerComplaint: average(complaintCosts.map((row) => row.estimatedCost)),
+    totalEstimatedCost: Math.round((sum(bookingCosts, 'estimatedCost') + sum(complaintCosts, 'estimatedCost')) * 1e4) / 1e4,
+    templateMessages: sum(bookingCosts, 'templateMessages') + sum(complaintCosts, 'templateMessages'),
+    messagesSavedByFastPath: redundantQuestionsAvoided,
+    aiCallsMade: aiRequested,
+    aiCallsAvoided,
+    aiAvoidanceRate: safeRatio(aiCallsAvoided, aiCallsAvoided + aiRequested),
+  };
+
   const summary = conversations === 0
     ? 'No chatbot activity was recorded in this period.'
     : `In this period, ${(kpis.bookingConversionRate * 100).toFixed(0)}% of booking journeys produced a booking. ${bookingsAbandoned ? `The highest recorded abandonment point was ${breakdown(scoped.filter((event) => event.event_type === 'BOOKING_ABANDONED'), normalizeStep)[0]?.label || 'unknown'}. ` : ''}Human handoff occurred in ${(kpis.handoffRate * 100).toFixed(0)}% of conversations.`;
@@ -259,6 +282,7 @@ function aggregateChatbotAnalytics(events = [], services = [], options = {}) {
     warnings: options.truncated ? ['The event limit was reached. Narrow the date range for complete results.'] : [],
     totals: { events: scoped.length },
     kpis,
+    cost,
     conversationTrend: buildTrend(scoped, 'CONVERSATION_STARTED', bounds),
     funnel,
     abandonment: breakdown(scoped.filter((event) => event.event_type === 'BOOKING_ABANDONED'), normalizeStep),

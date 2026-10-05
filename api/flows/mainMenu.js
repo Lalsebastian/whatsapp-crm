@@ -1,27 +1,53 @@
+// Main menu with progressive disclosure: the customer sees the 2–3 actions
+// that fit their situation (open complaint, upcoming visit, returning or new
+// customer), never the full catalogue of options. Everything else is still
+// one "More Options" tap or a typed request away.
 const whatsapp = require('../whatsapp/client');
 const sessionStore = require('../session/sessionStore');
 const logger = require('../utils/logger');
+const { getCrmAdapter } = require('../crm');
+const { menuFor } = require('./quickActions');
+
+const crm = getCrmAdapter();
+
+async function serviceNameLookup(serviceId) {
+  if (!serviceId) return null;
+  try {
+    const service = await crm.getServiceDetails(serviceId);
+    return service ? service.name : null;
+  } catch {
+    return null;
+  }
+}
 
 async function sendMainMenu(session, customer) {
   await sessionStore.clearFlow(session.phone);
   const profile = customer && customer.profile;
   const knownName = profile && profile.returningCustomer && profile.name;
-  const greeting = knownName
-    ? `Hello ${knownName} 👋 Welcome back to Joboy.\n\nHow can I help you today?`
-    : 'Hello 👋 Welcome to Joboy.\n\nI can help you book a home service, manage an existing booking, or resolve a service issue.\n\nHow can I help you today?';
-  await whatsapp.sendButtons(
-    session.phone,
-    greeting,
-    [
-      { id: 'BOOK_SERVICE', title: 'Book a Service' },
-      { id: 'MY_BOOKINGS', title: 'My Bookings' },
-      { id: 'MORE_OPTIONS', title: 'More Options' },
-    ]
-  );
+  let menu;
+  try {
+    menu = await menuFor(profile, serviceNameLookup);
+  } catch (error) {
+    logger.warn('MAIN_MENU', 'Contextual menu unavailable; using the standard menu:', error.message);
+    menu = await menuFor(null);
+  }
+
+  let greeting;
+  if (knownName) {
+    greeting = `Hello ${knownName} 👋 Welcome back to Joboy.`;
+  } else if (menu.situation === 'new_customer') {
+    greeting = 'Hello 👋 Welcome to Joboy.\n\nWe send verified professionals for AC, plumbing, electrical, cleaning and more. You can also just tell me what you need, for example "AC not cooling, tomorrow morning".';
+  } else {
+    greeting = 'Hello 👋 Welcome to Joboy.';
+  }
+  const body = [greeting, menu.context, 'How can I help you today?'].filter(Boolean).join('\n\n');
+
+  await whatsapp.sendButtons(session.phone, body, menu.buttons);
   logger.audit('MAIN_MENU_SHOWN', {
     phone: session.phone,
     customerId: customer && customer.id,
     flow: 'main_menu',
+    situation: menu.situation,
     result: 'shown',
   });
 }

@@ -7,7 +7,7 @@ import { assignTechnician, listTechnicians } from '@/lib/api/technicians';
 import { addressLabel, findScheduleConflicts, recommendTechnicians } from '@/lib/scheduling';
 import { slaState } from '@/lib/sla';
 import { downloadCsv, stamp } from '@/lib/csv';
-import { formatCurrency, formatDate, formatDateTime, formatNumber, formatPercent } from '@/lib/utils';
+import { formatCurrency, formatDate, formatDateTime, formatNumber, formatPercent, localDateKey } from '@/lib/utils';
 import { BOOKING_STATUS } from '@/lib/status';
 import { ViewShell, ChartPanel } from '@/components/layout/ViewShell';
 import { Panel, PanelBody, PanelHeader, PanelTitle } from '@/components/layout/Panel';
@@ -16,11 +16,11 @@ import { DataTable } from '@/components/data/DataTable';
 import { StatusBadge, Tag } from '@/components/data/StatusBadge';
 import { FilterBar, RangePicker } from '@/components/data/FilterBar';
 import { EmptyState, ErrorState, PanelSkeleton } from '@/components/data/EmptyState';
-import { RevenueChart, VolumeChart } from '@/components/charts/Charts';
+import { RevenueChart, VolumeChart } from '@/components/charts/LazyCharts';
 import { Button } from '@/components/ui/button';
 
 export function OwnerDispatch() {
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => localDateKey());
   const [recommendFor, setRecommendFor] = useState(null);
   const queryClient = useQueryClient();
   const bookings = useQuery({ queryKey: ['bookings', 'dispatch'], queryFn: () => listBookings({}) });

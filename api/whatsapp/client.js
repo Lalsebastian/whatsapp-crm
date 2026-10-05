@@ -96,7 +96,7 @@ async function logOutbound(to, type, content) {
 
 function recordBotMessage(to, messageType) {
   logger.audit('BOT_MESSAGE_SENT', { phone: to, messageType, result: 'sent' });
-  messageBudget.botMessage(to);
+  messageBudget.botMessage(to, messageType);
 }
 
 async function sendText(to, body) {
@@ -174,4 +174,55 @@ async function sendListMessage(to, bodyText, buttonText, sections) {
   return res;
 }
 
-module.exports = { sendText, sendButtons, sendListMessage, post };
+/**
+ * Sends an approved message template (required for business-initiated
+ * messages outside the 24-hour customer-service window).
+ *
+ * @param {string} to
+ * @param {{name: string, language?: string, bodyParams?: string[], quickReplyPayloads?: string[], summary?: string}} template
+ *   bodyParams fill {{1}}, {{2}}, ... in the template body; quickReplyPayloads
+ *   set the payload of the template's quick-reply buttons in order, so a tap
+ *   arrives as a button reply with that id. `summary` is what gets logged.
+ */
+async function sendTemplate(to, template) {
+  const options = (template.quickReplyPayloads || []).map((payload) => ({ id: payload, title: payload }));
+  if (testChannel.capture({ type: 'template', to, body: template.summary || template.name, template: template.name, options })) {
+    recordBotMessage(to, 'template');
+    return null;
+  }
+
+  const components = [];
+  if (template.bodyParams && template.bodyParams.length > 0) {
+    components.push({
+      type: 'body',
+      // WhatsApp rejects empty parameters; callers pass fallbacks, this is a
+      // last line of defence.
+      parameters: template.bodyParams.map((value) => ({ type: 'text', text: String(value || '-').slice(0, 1024) })),
+    });
+  }
+  (template.quickReplyPayloads || []).forEach((payload, index) => {
+    components.push({
+      type: 'button',
+      sub_type: 'quick_reply',
+      index: String(index),
+      parameters: [{ type: 'payload', payload }],
+    });
+  });
+
+  logger.log('SEND TEMPLATE', `to=${to}`, template.name);
+  const res = await post({
+    messaging_product: 'whatsapp',
+    to,
+    type: 'template',
+    template: {
+      name: template.name,
+      language: { code: template.language || env.WHATSAPP_TEMPLATE_LANGUAGE },
+      ...(components.length ? { components } : {}),
+    },
+  });
+  await logOutbound(to, 'template', template.summary || `[template:${template.name}]`);
+  recordBotMessage(to, 'template');
+  return res;
+}
+
+module.exports = { sendText, sendButtons, sendListMessage, sendTemplate, post };

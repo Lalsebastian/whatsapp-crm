@@ -5,11 +5,14 @@
 const sessionStore = require('../session/sessionStore');
 const db = require('../db/supabaseClient');
 const intentService = require('../ai/intentService');
+const { urgentReason } = require('../ai/serviceSynonyms');
+const { deterministicAssist, hasPlaybook } = require('./agentAssist');
 const logger = require('../utils/logger');
 
 const RE_URGENT_ELECTRICAL = /\b(burning smell|smoke|smoking|sparks?|electrical fire|electric shock|live wire)\b/i;
 const RE_URGENT_WATER = /\b(flood|flooding|burst pipe|water (?:near|on) (?:a |the )?(?:socket|switch|wire|electric))\b/i;
 const RE_URGENT_HAZARD = /\b(gas leak|active fire|immediate danger)\b/i;
+const RE_GAS = /\bgas\b.{0,20}\b(?:smell|smelling|leak|leaking)\b|\b(?:smell|smells) (?:of|like) gas\b/i;
 const RE_SAFETY = /\b(unsafe|dangerous|threat|harass|inappropriate|scared|afraid)\b/i;
 const RE_PAYMENT = /\b(refund|overcharg|payment issue|money back|payment dispute|billing dispute|scam)\b/i;
 const RE_DAMAGE = /\b(?:technician|worker|service).{0,30}\b(?:damage|damaged|broke)\b|\b(?:damage|damaged)\b.{0,30}\b(?:property|home|wall|floor|window|furniture|appliance)\b/i;
@@ -25,21 +28,28 @@ function isStruggling({ intent, confidence }) {
 }
 
 function safetyReason(text) {
+  if (RE_GAS.test(text)) return 'immediate_safety_concern';
   if (RE_URGENT_ELECTRICAL.test(text)) return 'electrical_safety_concern';
   if (RE_URGENT_WATER.test(text)) return 'flooding_safety_concern';
   if (RE_URGENT_HAZARD.test(text)) return 'immediate_safety_concern';
   if (RE_SAFETY.test(text)) return 'safety_concern';
-  return null;
+  // The synonym dictionary's urgent phrases ("smell of gas", "sparking",
+  // "water everywhere") catch wording the patterns above miss.
+  return urgentReason(text);
 }
 
 function safetyGuidanceFor(text) {
-  if (RE_URGENT_ELECTRICAL.test(text)) {
+  const dictionaryReason = urgentReason(text);
+  if (RE_GAS.test(text)) {
+    return 'For your safety: please don’t switch any lights or appliances on or off, open the windows, and leave the area. If the smell is strong, call emergency services on 997. I’m escalating this to our support team now.';
+  }
+  if (RE_URGENT_ELECTRICAL.test(text) || dictionaryReason === 'electrical_safety_concern') {
     return 'For safety, please avoid using the affected switch, socket, or appliance and keep clear of the area. I’m escalating this to our support team now.';
   }
-  if (RE_URGENT_WATER.test(text)) {
+  if (RE_URGENT_WATER.test(text) || dictionaryReason === 'flooding_safety_concern') {
     return 'For safety, please keep clear of the affected area and avoid contact with any nearby electrical fittings. I’m escalating this to our support team now.';
   }
-  if (RE_URGENT_HAZARD.test(text) || RE_SAFETY.test(text)) {
+  if (RE_URGENT_HAZARD.test(text) || RE_SAFETY.test(text) || dictionaryReason) {
     return 'Please keep a safe distance from the affected area. I’m escalating this to our support team now.';
   }
   return null;
@@ -257,8 +267,22 @@ async function buildHandoff({
     complaint,
     media,
   });
-  const aiSummary = await intentService.summarizeHandoff(base);
-  return { ...base, issue: { ...base.issue, summary: aiSummary || fallback } };
+  // One AI call drafts the staff summary, a suggested first reply and the
+  // next action; deterministic drafts fill anything the AI did not return.
+  const ai = await intentService.assistHandoff(base);
+  const drafted = deterministicAssist(base, reason, fallback);
+  const assist = {
+    summary: (ai && ai.summary) || drafted.summary,
+    suggestedReply: (ai && ai.suggestedReply) || drafted.suggestedReply,
+    recommendedNextAction: (ai && ai.nextAction) || (hasPlaybook(reason) ? drafted.recommendedNextAction : (suggestedNextAction || drafted.recommendedNextAction)),
+    source: ai ? 'ai' : 'rules',
+  };
+  return {
+    ...base,
+    issue: { ...base.issue, summary: assist.summary },
+    suggestedNextAction: assist.recommendedNextAction,
+    assist,
+  };
 }
 
 async function triggerEscalation(input) {

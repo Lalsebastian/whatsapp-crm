@@ -1,16 +1,19 @@
 const reliability = require('../config/reliability');
 const logger = require('../utils/logger');
-const { withTimeout, retry, isTransientError } = require('../reliability/asyncPolicy');
+const { withTimeout, retry, isTransientError, OperationTimeoutError } = require('../reliability/asyncPolicy');
+const { activeScenario } = require('../simulation/scenarios');
 const { CircuitBreaker } = require('../reliability/circuitBreaker');
 
 const READ_METHODS = new Set([
   'findCustomerByPhone',
+  'getCustomerById',
   'getCustomerProperties',
   'getCustomerPreferences',
   'getServices',
   'getServiceDetails',
   'checkServiceability',
   'getAvailability',
+  'getAvailabilityRange',
   'getBookings',
   'getBookingStatus',
   'getBookingById',
@@ -23,14 +26,31 @@ const READ_METHODS = new Set([
 const WRITE_METHODS = new Set([
   'addProperty',
   'createBooking',
+  'createBookings',
   'rescheduleBooking',
   'cancelBooking',
   'createComplaint',
+  'addComplaintDetails',
   'escalateToHuman',
   'createFeedback',
   'markFeedbackFollowUp',
   'updateCustomerPreferences',
 ]);
+
+// Test-console simulation (simulation/scenarios.js); always inactive for real
+// traffic. Returns a promise to use instead of the real call, or null.
+function simulated(method, isRead, timeoutMs) {
+  const scenario = activeScenario();
+  if (scenario === 'crm_timeout' && !isRead) {
+    // Flagged so it never counts against the real CRM circuit breaker.
+    return Promise.reject(Object.assign(new OperationTimeoutError(`CRM.${method}`, timeoutMs, { uncertain: true }), { simulated: true }));
+  }
+  if (scenario === 'service_unavailable') {
+    if (method === 'checkServiceability') return Promise.resolve({ serviceable: false, source: 'simulation' });
+    if (method === 'getAvailability' || method === 'getAvailabilityRange') return Promise.resolve([]);
+  }
+  return null;
+}
 
 function wrapCrmAdapter(adapter, options = {}) {
   const timeoutMs = options.timeoutMs || reliability.CRM_REQUEST_TIMEOUT_MS;
@@ -43,11 +63,14 @@ function wrapCrmAdapter(adapter, options = {}) {
 
   const wrapped = {};
   for (const method of [...READ_METHODS, ...WRITE_METHODS]) {
+    // Optional capabilities (e.g. getAvailabilityRange) are only exposed when
+    // the underlying adapter implements them, so callers can feature-detect.
+    if (typeof adapter[method] !== 'function') continue;
     wrapped[method] = async (...args) => {
       const startedAt = Date.now();
       const isRead = READ_METHODS.has(method);
       const call = () => withTimeout(
-        () => adapter[method](...args),
+        () => simulated(method, isRead, timeoutMs) || adapter[method](...args),
         timeoutMs,
         `CRM.${method}`,
         { uncertain: !isRead }
@@ -76,7 +99,7 @@ function wrapCrmAdapter(adapter, options = {}) {
         if (!isRead && (error.code === 'OPERATION_TIMEOUT' || isTransientError(error))) {
           error.uncertain = true;
         }
-        if (error.code === 'OPERATION_TIMEOUT' || isTransientError(error)) breaker.recordFailure();
+        if (!error.simulated && (error.code === 'OPERATION_TIMEOUT' || isTransientError(error))) breaker.recordFailure();
         logger.audit(isRead ? 'CRM_READ_ERROR' : 'CRM_WRITE_ERROR', {
           operation: method,
           latencyMs: Date.now() - startedAt,

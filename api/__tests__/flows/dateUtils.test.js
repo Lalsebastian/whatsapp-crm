@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 
-const { parseDateInput, formatDateForCustomer, formatSlotForCustomer } = require('../../flows/dateUtils');
+const {
+  parseDateInput, formatDateForCustomer, formatSlotForCustomer, todayInTimeZone, addDays,
+} = require('../../flows/dateUtils');
 
 describe('customer-facing date and slot formatting', () => {
   it('formats an ISO date without exposing the raw value', () => {
@@ -21,18 +23,28 @@ describe('customer-facing date and slot formatting', () => {
     expect(parseDateInput('31/13/2026')).toBeNull();
   });
 
+  // Fixed clock: Sunday 4 October 2026, 10:00 in Dubai.
+  const now = new Date('2026-10-04T06:00:00Z');
+
   it('understands "day after tomorrow" for voice and text input', () => {
-    const expected = new Date();
-    expected.setDate(expected.getDate() + 2);
-    expect(parseDateInput('day after tomorrow')).toBe(expected.toISOString().slice(0, 10));
+    expect(parseDateInput('day after tomorrow', { now })).toBe('2026-10-06');
   });
 
   it('understands the next named weekday', () => {
-    const today = new Date();
-    const targetDay = (today.getDay() + 3) % 7;
-    const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const expected = new Date(today);
-    expected.setDate(today.getDate() + 3);
-    expect(parseDateInput(weekdays[targetDay])).toBe(expected.toISOString().slice(0, 10));
+    expect(parseDateInput('wednesday', { now })).toBe('2026-10-07');
+    expect(parseDateInput('next sunday', { now })).toBe('2026-10-11');
+  });
+
+  it('resolves "today" in the business timezone, not the server\'s UTC date', () => {
+    // 01:30 on 5 October in Dubai is still 4 October in UTC.
+    const earlyMorningDubai = new Date('2026-10-04T21:30:00Z');
+    expect(parseDateInput('today', { now: earlyMorningDubai })).toBe('2026-10-05');
+    expect(parseDateInput('tomorrow', { now: earlyMorningDubai })).toBe('2026-10-06');
+    expect(todayInTimeZone(earlyMorningDubai, 'UTC')).toBe('2026-10-04');
+  });
+
+  it('adds days across month boundaries', () => {
+    expect(addDays('2026-10-31', 1)).toBe('2026-11-01');
+    expect(addDays('2026-01-01', -1)).toBe('2025-12-31');
   });
 });

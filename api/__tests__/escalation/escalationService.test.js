@@ -6,6 +6,7 @@ const sessionStore = require('../../session/sessionStore');
 sessionStore.setHumanTakeover = vi.fn();
 const intentService = require('../../ai/intentService');
 intentService.summarizeHandoff = vi.fn();
+intentService.assistHandoff = vi.fn();
 const analytics = require('../../analytics/eventWriter');
 
 const {
@@ -21,6 +22,7 @@ beforeEach(() => {
   db.get.mockReset().mockResolvedValue([]);
   sessionStore.setHumanTakeover.mockReset().mockResolvedValue({});
   intentService.summarizeHandoff.mockReset().mockResolvedValue(null);
+  intentService.assistHandoff.mockReset().mockResolvedValue(null);
   analytics.clearTestEvents();
 });
 
@@ -98,7 +100,11 @@ describe('evaluateTriggers', () => {
       content: `message-${index}`,
       created_at: `2026-09-30T00:00:${String(index).padStart(2, '0')}Z`,
     })));
-    intentService.summarizeHandoff.mockResolvedValue('Customer needs electrical service and supplied a voice note.');
+    intentService.assistHandoff.mockResolvedValue({
+      summary: 'Customer needs electrical service and supplied a voice note.',
+      suggestedReply: 'Hi Asha, this is the Joboy support team. I can see your socket is not working at Home — Kakkanad.',
+      nextAction: 'Offer an electrician slot for the evening the customer asked for.',
+    });
 
     const handoff = await buildHandoff({
       phone: '971500',
@@ -136,6 +142,27 @@ describe('evaluateTriggers', () => {
       { type: 'image', mediaId: 'image-1' },
     ]));
     expect(handoff.recentMessages).toHaveLength(HISTORY_LIMIT);
+    expect(handoff.assist).toEqual({
+      summary: 'Customer needs electrical service and supplied a voice note.',
+      suggestedReply: 'Hi Asha, this is the Joboy support team. I can see your socket is not working at Home — Kakkanad.',
+      recommendedNextAction: 'Offer an electrician slot for the evening the customer asked for.',
+      source: 'ai',
+    });
+  });
+
+  it('drafts a specific reply and next action without AI, never promising outcomes', async () => {
+    const handoff = await buildHandoff({
+      phone: '971500',
+      customerId: 'cust1',
+      customer: { id: 'cust1', name: 'Asha Menon' },
+      reason: 'repeat_service_failure',
+      complaint: { reference: 'CM-REPEAT1', category: 'problem_returned' },
+      session: { context: {} },
+    });
+    expect(handoff.assist.source).toBe('rules');
+    expect(handoff.assist.suggestedReply).toMatch(/^Hi Asha, I'm sorry the problem has come back after visit CM-REPEAT1/);
+    expect(handoff.assist.suggestedReply).not.toMatch(/refund|compensat|will arrive|guarantee/i);
+    expect(handoff.suggestedNextAction).toBe('Review the previous job notes and arrange a revisit with the customer.');
   });
 
   it('uses a deterministic summary when AI summarization fails', async () => {

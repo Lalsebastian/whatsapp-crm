@@ -42,7 +42,22 @@ async function getWithRetry(label, url, config) {
   });
 }
 
-async function downloadWhatsAppMedia(mediaId, { maxBytes = voiceConfig.VOICE_MAX_FILE_SIZE_BYTES } = {}) {
+const KINDS = {
+  audio: { prefix: 'audio/', label: 'Voice note', notAllowed: 'MEDIA_NOT_AUDIO' },
+  image: { prefix: 'image/', label: 'Image', notAllowed: 'MEDIA_NOT_IMAGE' },
+};
+
+function matchesKind(contentType, kind) {
+  return String(contentType || '').toLowerCase().startsWith(KINDS[kind].prefix);
+}
+
+/**
+ * Downloads WhatsApp media of the expected kind ("audio" for voice notes,
+ * "image" for complaint photos). The declared type and size are checked
+ * before any bytes are fetched.
+ */
+async function downloadWhatsAppMedia(mediaId, { maxBytes = voiceConfig.VOICE_MAX_FILE_SIZE_BYTES, kind = 'audio' } = {}) {
+  const expected = KINDS[kind] || KINDS.audio;
   if (!mediaId || typeof mediaId !== 'string') {
     throw new MediaDownloadError('MEDIA_ID_REQUIRED', 'A WhatsApp media ID is required');
   }
@@ -54,7 +69,11 @@ async function downloadWhatsAppMedia(mediaId, { maxBytes = voiceConfig.VOICE_MAX
   if (!mediaUrl) throw new MediaDownloadError('MEDIA_URL_MISSING', 'Meta returned no media download URL');
   const declaredSize = Number(metaRes.data && metaRes.data.file_size);
   if (Number.isFinite(declaredSize) && declaredSize > maxBytes) {
-    throw new MediaDownloadError('MEDIA_TOO_LARGE', 'Voice note exceeds the configured size limit');
+    throw new MediaDownloadError('MEDIA_TOO_LARGE', `${expected.label} exceeds the configured size limit`);
+  }
+  const mimeType = metaRes.data && metaRes.data.mime_type;
+  if (!mimeType || !matchesKind(mimeType, kind)) {
+    throw new MediaDownloadError(expected.notAllowed, `WhatsApp media is not a supported ${kind} file`);
   }
 
   const fileRes = await getWithRetry('content', validateDownloadUrl(mediaUrl), {
@@ -66,15 +85,11 @@ async function downloadWhatsAppMedia(mediaId, { maxBytes = voiceConfig.VOICE_MAX
   });
   const buffer = Buffer.from(fileRes.data || []);
   if (buffer.length === 0) throw new MediaDownloadError('MEDIA_EMPTY', 'Downloaded media was empty');
-  if (buffer.length > maxBytes) throw new MediaDownloadError('MEDIA_TOO_LARGE', 'Voice note exceeds the configured size limit');
+  if (buffer.length > maxBytes) throw new MediaDownloadError('MEDIA_TOO_LARGE', `${expected.label} exceeds the configured size limit`);
 
-  const mimeType = metaRes.data && metaRes.data.mime_type;
-  if (!mimeType || !String(mimeType).toLowerCase().startsWith('audio/')) {
-    throw new MediaDownloadError('MEDIA_NOT_AUDIO', 'WhatsApp media is not a supported audio file');
-  }
   const responseType = fileRes.headers && fileRes.headers['content-type'];
-  if (responseType && !String(responseType).toLowerCase().startsWith('audio/') && !String(responseType).toLowerCase().startsWith('application/octet-stream')) {
-    throw new MediaDownloadError('MEDIA_CONTENT_TYPE_MISMATCH', 'Downloaded media content type was not audio');
+  if (responseType && !matchesKind(responseType, kind) && !String(responseType).toLowerCase().startsWith('application/octet-stream')) {
+    throw new MediaDownloadError('MEDIA_CONTENT_TYPE_MISMATCH', `Downloaded media content type was not ${kind}`);
   }
   return { buffer, mimeType, fileSize: buffer.length };
 }

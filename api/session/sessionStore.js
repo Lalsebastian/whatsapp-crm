@@ -77,8 +77,12 @@ async function resetSession(phone) {
   return updated && updated.length > 0 ? mapSession(updated[0]) : null;
 }
 
+// The start time lets escalation/takeover.js end a takeover that nobody
+// closed (HUMAN_TAKEOVER_MAX_HOURS).
 async function setHumanTakeover(phone, value) {
-  return updateSession(phone, { humanTakeover: value });
+  return updateSession(phone, value
+    ? { humanTakeover: true, context: { takeoverStartedAt: new Date().toISOString() } }
+    : { humanTakeover: false, context: {} });
 }
 
 async function touchActivity(phone) {
@@ -91,7 +95,11 @@ function isExpired(session, now = Date.now()) {
   if (!session || session.humanTakeover || !session.currentFlow || !session.currentStep) return false;
   const lastActivity = Date.parse(session.lastActivityAt);
   if (!Number.isFinite(lastActivity)) return false;
-  return now - lastActivity > reliability.SESSION_TTL_MINUTES * 60 * 1000;
+  // Business-initiated prompts (e.g. a feedback request after a completed
+  // job) carry their own, longer reply window in the flow context.
+  const flowTtl = Number(session.context && session.context.flowTtlMinutes);
+  const ttlMinutes = Number.isFinite(flowTtl) && flowTtl > 0 ? flowTtl : reliability.SESSION_TTL_MINUTES;
+  return now - lastActivity > ttlMinutes * 60 * 1000;
 }
 
 module.exports = { getOrCreateSession, updateSession, setFlow, clearFlow, resetSession, setHumanTakeover, touchActivity, isExpired };

@@ -135,25 +135,50 @@ Customer correction: """${message}"""`;
 }
 
 function buildHandoffSummaryPrompt(handoff) {
-  return `Write a short internal support summary for a home-services case.
+  return `You assist a human support agent who is taking over a home-services WhatsApp conversation.
 
 Return ONLY one JSON object with exactly this shape:
 {
-  "summary": string
+  "summary": string,
+  "suggestedReply": string,
+  "nextAction": string
 }
 
 Rules:
-- Use only facts present in the supplied handoff data.
-- Keep the summary concise: no more than three short sentences.
-- Preserve the practical issue, relevant booking or complaint context, supplied media, and what the customer is asking for.
-- Do not speculate about emotions, fault, technician arrival times, outcomes, or promises.
-- Do not invent missing details.
-- This is internal staff context, not customer-facing wording.
+- Use only facts present in the supplied handoff data. Do not invent missing details.
+- "summary": internal staff context, at most three short sentences: the practical issue, the relevant booking or complaint, supplied media, and what the customer wants.
+- "suggestedReply": the agent's first WhatsApp message to the customer, at most three short sentences, warm and specific to this case, written in the customer's language when it is clear from the data (otherwise English). Address the customer by first name if known. It must NOT promise arrival times, refunds, compensation, fault, or outcomes, and must not claim actions that have not happened.
+- "nextAction": one short internal instruction for the agent (what to check or do first).
+- No speculation about emotions, fault, or causes.
 
 Handoff data: ${JSON.stringify(handoff)}`;
 }
 
+function buildImageReviewPrompt(context = {}) {
+  return `You review a photo a customer sent to a home-services company about a service problem.
+
+Return ONLY one JSON object with exactly this shape:
+{
+  "relevance": one of ["relevant", "unclear", "unrelated"],
+  "subject": string,
+  "containsSensitiveDocument": boolean,
+  "confidence": number between 0 and 1
+}
+
+Rules:
+- "subject" is a short, neutral description of what is visible (at most 12 words), e.g. "water stain under a kitchen sink".
+- "relevant": the photo plausibly shows a home, appliance, fixture, damage, leak, pest, mess, receipt or invoice related to a home service.
+- "unclear": too dark, blurred or close-up to tell.
+- "unrelated": clearly unrelated (selfie, meme, screenshot of a chat, landscape).
+- "containsSensitiveDocument": true if a passport, ID card, bank/credit card, cheque, or a document with personal data is readable.
+- Describe only what is visible. Do NOT diagnose causes, assign fault, estimate costs, or judge safety.
+- Never invent details that are not visible.
+
+Customer's issue so far (may be empty): """${String(context.issue || '').slice(0, 300)}"""`;
+}
+
 module.exports = {
+  buildImageReviewPrompt,
   INTENTS,
   LANGUAGES,
   COMPLAINT_CATEGORIES,

@@ -66,7 +66,11 @@
  * @property {(bookingId: string) => Promise<Booking|null>} getBookingById
  * @property {(bookingId: string, input: {date: string, time: string}) => Promise<Booking>} rescheduleBooking
  * @property {(bookingId: string) => Promise<Booking>} cancelBooking
- * @property {(input: {customerId: string, bookingId?: string, category: string, description?: string, attachments?: Array<{waMediaId: string, mediaType: string}>}) => Promise<Complaint>} createComplaint
+ * @property {(customerId: string) => Promise<Customer|null>} getCustomerById
+ * @property {(serviceId: string, opts: {fromDate: string, days?: number, location?: Object}) => Promise<Array<{date: string, slots: Array<string|Object>}>>} [getAvailabilityRange] optional; see crm/slots.js for slot shapes
+ * @property {(input: {customerId: string, items: Array<{propertyId: string, serviceId: string, date: string, time: string, slotId?: string, notes?: string}>, idempotencyKey?: string}) => Promise<Booking[]>} createBookings all-or-nothing, same order as items
+ * @property {(input: {customerId: string, bookingId?: string, category: string, description?: string, priority?: string, attachments?: Array<{waMediaId: string, mediaType: string}>}) => Promise<Complaint>} createComplaint
+ * @property {(complaintId: string, input: {customerId: string, text?: string, attachments?: Array<{waMediaId: string, mediaType: string}>, idempotencyKey?: string}) => Promise<Complaint>} addComplaintDetails
  * @property {(reference: string) => Promise<Complaint|null>} getComplaintStatus
  * @property {(customerId: string, bookingId: string) => Promise<Complaint|null>} getOpenComplaintForBooking
  * @property {(customerId: string, opts?: {limit?: number}) => Promise<Complaint[]>} getActiveComplaints

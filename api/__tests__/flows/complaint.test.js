@@ -106,9 +106,10 @@ describe('complaint flow', () => {
       '971500', 'complaint', 'awaiting_media',
       expect.objectContaining({ attachments: [{ waMediaId: 'w1', mediaType: 'image' }, { waMediaId: 'w2', mediaType: 'video' }] })
     );
-    expect(whatsapp.sendText).toHaveBeenCalledWith(
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
       '971500',
-      expect.stringContaining("I've received 2 attachments")
+      expect.stringContaining("I've received 2 attachments"),
+      [{ id: 'MEDIA_DONE', title: 'Skip / Done' }]
     );
   });
 
@@ -147,9 +148,10 @@ describe('complaint flow', () => {
     expect(fakeCrm.createComplaint).toHaveBeenCalledWith(expect.objectContaining({
       customerId: 'cust1', category: 'other', description: 'leak under sink', attachments: [{ waMediaId: 'w1', mediaType: 'image' }],
     }));
-    expect(whatsapp.sendText).toHaveBeenCalledWith(
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
       '971500',
-      expect.stringContaining("I've registered your complaint with our support team")
+      expect.stringContaining("I've registered your complaint with our support team"),
+      [{ id: 'COMPLAINT_STATUS:c1', title: 'Complaint Status' }, { id: 'MAIN_MENU', title: 'Main Menu' }]
     );
     expect(analytics.getTestEvents('971500').map((event) => event.eventType))
       .toEqual(expect.arrayContaining(['COMPLAINT_CREATED', 'CONVERSATION_COMPLETED']));
@@ -165,8 +167,9 @@ describe('complaint flow', () => {
 
     expect(whatsapp.sendText).toHaveBeenCalledWith(
       '971500',
-      expect.stringContaining("You won't need to repeat everything when they take over")
+      expect.stringContaining("marked it as high priority and shared everything you've told me")
     );
+    expect(fakeCrm.createComplaint).toHaveBeenCalledWith(expect.objectContaining({ priority: 'high' }));
     expect(escalationService.triggerEscalation).toHaveBeenCalledWith(expect.objectContaining({
       complaint: expect.objectContaining({ reference: 'CM-PRIORITY', category: 'property_damage' }),
       reason: 'property_damage',
@@ -182,9 +185,9 @@ describe('complaint flow', () => {
 
     await complaint.steps.confirm(session, { id: 'cust1' }, { buttonId: 'CONFIRM_COMPLAINT' });
 
-    const message = whatsapp.sendText.mock.calls.at(-1)[1];
+    const message = whatsapp.sendButtons.mock.calls.at(-1)[1];
     expect(message).toContain("I've registered your complaint with our support team");
-    expect(message).not.toContain("You won't need to repeat everything");
+    expect(message).not.toContain('shared everything');
     expect(sessionStore.clearFlow).toHaveBeenCalledWith('971500');
   });
 

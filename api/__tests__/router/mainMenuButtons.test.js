@@ -78,7 +78,7 @@ describe('three-button main menu', () => {
     profiles.clearForTests();
   });
 
-  it.each(['Hi', 'Hello', 'Hey', 'Menu', 'Start'])('shows three direct buttons for %s', async (greeting) => {
+  it.each(['Hi', 'Hello', 'Hey', 'Menu', 'Start'])('shows a new customer the three most useful actions for %s', async (greeting) => {
     await send({ text: greeting, id: `greeting-${greeting}` });
 
     expect(whatsapp.sendButtons).toHaveBeenCalledWith(
@@ -86,8 +86,8 @@ describe('three-button main menu', () => {
       expect.stringContaining('Hello 👋 Welcome to Joboy.'),
       [
         { id: 'BOOK_SERVICE', title: 'Book a Service' },
-        { id: 'MY_BOOKINGS', title: 'My Bookings' },
-        { id: 'MORE_OPTIONS', title: 'More Options' },
+        { id: 'SERVICE_INFO', title: 'Our Services' },
+        { id: 'HUMAN_SUPPORT', title: 'Talk to Support' },
       ]
     );
     expect(whatsapp.sendListMessage).not.toHaveBeenCalled();
@@ -142,7 +142,7 @@ describe('three-button main menu', () => {
     expect(whatsapp.sendButtons).toHaveBeenCalledWith(
       '971500',
       expect.any(String),
-      expect.arrayContaining([{ id: 'MORE_OPTIONS', title: 'More Options' }])
+      expect.arrayContaining([{ id: 'BOOK_SERVICE', title: 'Book a Service' }])
     );
   });
 

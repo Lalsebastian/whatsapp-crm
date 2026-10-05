@@ -138,6 +138,35 @@ cd api && npm run dev
 npm run build
 ```
 
+Node 22.12+ is required (see `.nvmrc`).
+
+### Database migrations
+
+Apply in this order in the Supabase SQL editor (all are idempotent):
+
+1. `api/db/schema.sql`
+2. `api/db/migrations/2026_dashboard.sql`
+3. `supabase/migrations/202609300001_crm_operations_intelligence.sql` … `202609300003_crm_control_centre.sql`
+4. `supabase/migrations/202610040001_chatbot_reliability_lifecycle.sql`: cross-instance locks
+   and duplicate protection, atomic multi-service booking, CRM lifecycle events, geocoded
+   addresses and voice-data retention. The backend must use `SUPABASE_SERVICE_ROLE_KEY`.
+
+### Tests
+
+```bash
+npm run lint             # frontend + backend
+npm test                 # frontend unit + React component tests (Vitest)
+npm run test:coverage    # same, with coverage thresholds
+npm run test:e2e         # Playwright: Owner, Agent and Technician consoles in Chromium
+cd api && npm test       # chatbot backend (Vitest), incl. the SQL migration on PGlite
+cd api && npm run test:coverage
+```
+
+The end-to-end tests run the app against an in-memory fake of the Supabase API
+(`e2e/support/fakeSupabase.js`), so they never touch a real project. First run:
+`npx playwright install chromium`. CI (`.github/workflows/ci.yml`) runs all of
+the above, plus a production-dependency audit, on every push.
+
 ## 📄 License
 
 MIT License

@@ -8,13 +8,22 @@ db.get = vi.fn();
 db.insert = vi.fn();
 db.upsert = vi.fn();
 db.patch = vi.fn();
+db.rpc = vi.fn();
 
 const crm = require('../../crm/supabaseCrmAdapter');
+const { todayInTimeZone, addDays } = require('../../flows/dateUtils');
+
+function missingFunctionError() {
+  return Object.assign(new Error('Not Found'), { response: { status: 404, data: { code: 'PGRST202' } } });
+}
 
 describe('supabaseCrmAdapter', () => {
-  beforeEach(() => { db.get.mockReset(); db.insert.mockReset(); db.upsert.mockReset(); db.patch.mockReset(); });
+  beforeEach(() => {
+    db.get.mockReset(); db.insert.mockReset(); db.upsert.mockReset(); db.patch.mockReset(); db.rpc.mockReset();
+  });
 
-  it('createBooking generates a BK- prefixed reference and inserts the right payload', async () => {
+  it('createBooking falls back to a direct insert with a BK- reference when the atomic function is not deployed', async () => {
+    db.rpc.mockRejectedValueOnce(missingFunctionError());
     db.get.mockResolvedValueOnce([{ id: 'svc1', name: 'AC', base_price: 150 }]); // getServiceDetails lookup
     db.insert.mockResolvedValueOnce([{
       id: 'b1', reference: 'BK-ABC123', customer_id: 'cust1', property_id: 'prop1', service_id: 'svc1',
@@ -85,11 +94,104 @@ describe('supabaseCrmAdapter', () => {
     expect(db.patch).not.toHaveBeenCalled();
   });
 
-  it('getAvailability excludes already-booked slots for that service/date', async () => {
-    db.get.mockResolvedValueOnce([{ scheduled_time: '09:00:00' }]);
-    const slots = await crm.getAvailability('svc1', '2026-10-01');
-    expect(slots).not.toContain('09:00');
-    expect(slots.length).toBeGreaterThan(0);
+  it('getAvailability excludes already-booked slots and returns structured slot data', async () => {
+    const date = addDays(todayInTimeZone(), 2);
+    db.get
+      .mockResolvedValueOnce([{ scheduled_time: '09:00:00' }]) // bookings on that date
+      .mockResolvedValueOnce([{ id: 'svc1', name: 'AC', duration_minutes: 90 }]); // service duration
+    const slots = await crm.getAvailability('svc1', date);
+    expect(slots.map((slot) => slot.id)).not.toContain('09:00');
+    expect(slots[0]).toEqual({
+      id: '11:00',
+      start: '11:00',
+      end: '12:30',
+      startsAt: `${date}T11:00:00+04:00`,
+      endsAt: `${date}T12:30:00+04:00`,
+      timezone: 'Asia/Dubai',
+      label: '11:00 AM – 12:30 PM',
+    });
+  });
+
+  it('getAvailability never offers past dates', async () => {
+    db.get.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: 'svc1', duration_minutes: 60 }]);
+    expect(await crm.getAvailability('svc1', addDays(todayInTimeZone(), -1))).toEqual([]);
+  });
+
+  it('getAvailabilityRange returns every day in the window from one bookings query', async () => {
+    const from = addDays(todayInTimeZone(), 1);
+    db.get
+      .mockResolvedValueOnce([{ scheduled_date: from, scheduled_time: '09:00:00' }])
+      .mockResolvedValueOnce([{ id: 'svc1', duration_minutes: 60 }]);
+    const range = await crm.getAvailabilityRange('svc1', { fromDate: from, days: 3 });
+    expect(range.map((day) => day.date)).toEqual([from, addDays(from, 1), addDays(from, 2)]);
+    expect(range[0].slots.map((slot) => slot.id)).not.toContain('09:00');
+    expect(range[1].slots.map((slot) => slot.id)).toContain('09:00');
+    expect(db.get).toHaveBeenNthCalledWith(1, 'bookings', expect.stringContaining(`scheduled_date=gte.${from}`));
+  });
+
+  it('createBookings creates every service through one atomic database call', async () => {
+    db.rpc.mockResolvedValueOnce([
+      { id: 'b1', reference: 'BK-AAA111', customer_id: 'cust1', service_id: 'svc1', status: 'confirmed' },
+      { id: 'b2', reference: 'BK-BBB222', customer_id: 'cust1', service_id: 'svc2', status: 'confirmed' },
+    ]);
+    const bookings = await crm.createBookings({
+      customerId: 'cust1',
+      idempotencyKey: 'wa-nonce',
+      items: [
+        { propertyId: 'p1', serviceId: 'svc1', date: '2026-10-10', time: '09:00' },
+        { propertyId: 'p1', serviceId: 'svc2', date: '2026-10-10', time: '11:00', notes: 'kitchen' },
+      ],
+    });
+    expect(bookings.map((booking) => booking.reference)).toEqual(['BK-AAA111', 'BK-BBB222']);
+    expect(db.rpc).toHaveBeenCalledTimes(1);
+    expect(db.rpc).toHaveBeenCalledWith('chatbot_create_bookings', {
+      p_customer_id: 'cust1',
+      p_idempotency_key: 'wa-nonce',
+      p_items: [
+        { property_id: 'p1', service_id: 'svc1', scheduled_date: '2026-10-10', scheduled_time: '09:00', notes: null },
+        { property_id: 'p1', service_id: 'svc2', scheduled_date: '2026-10-10', scheduled_time: '11:00', notes: 'kitchen' },
+      ],
+    });
+    expect(db.insert).not.toHaveBeenCalled();
+  });
+
+  it('maps a slot conflict raised by the database to a definitive SLOT_UNAVAILABLE error', async () => {
+    db.rpc.mockRejectedValueOnce(Object.assign(new Error('Bad Request'), {
+      response: { status: 400, data: { code: 'P0001', message: 'SLOT_UNAVAILABLE:1' } },
+    }));
+    await expect(crm.createBookings({
+      customerId: 'cust1',
+      items: [{ propertyId: 'p1', serviceId: 'svc1', date: '2026-10-10', time: '09:00' }],
+    })).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' });
+  });
+
+  it('cancels already-created bookings when the non-atomic fallback fails part-way', async () => {
+    db.rpc.mockRejectedValueOnce(missingFunctionError());
+    db.get.mockResolvedValue([{ id: 'svc', base_price: 100 }]);
+    db.insert
+      .mockResolvedValueOnce([{ id: 'b1', reference: 'BK-AAA111', status: 'confirmed' }])
+      .mockRejectedValueOnce(Object.assign(new Error('Bad Request'), { response: { status: 400, data: {} } }));
+    db.patch.mockResolvedValueOnce([{ id: 'b1', status: 'cancelled' }]);
+    await expect(crm.createBookings({
+      customerId: 'cust1',
+      items: [
+        { propertyId: 'p1', serviceId: 'svc1', date: '2026-10-10', time: '09:00' },
+        { propertyId: 'p1', serviceId: 'svc2', date: '2026-10-10', time: '11:00' },
+      ],
+    })).rejects.toThrow('Bad Request');
+    expect(db.patch).toHaveBeenCalledWith('bookings', 'id=eq.b1', expect.objectContaining({ status: 'cancelled' }));
+  });
+
+  it('saves geocoded coordinates with a new property, or the address alone before the column migration', async () => {
+    db.insert
+      .mockRejectedValueOnce(Object.assign(new Error('Bad Request'), { response: { status: 400, data: { code: 'PGRST204' } } }))
+      .mockResolvedValueOnce([{ id: 'p9', customer_id: 'cust1', address_line: 'Villa 3, Al Barsha', city: 'Dubai' }]);
+    const property = await crm.addProperty('cust1', {
+      addressLine: 'Villa 3, Al Barsha', city: 'Dubai', latitude: 25.1, longitude: 55.2, locationSource: 'whatsapp_location',
+    });
+    expect(property.id).toBe('p9');
+    expect(db.insert).toHaveBeenNthCalledWith(1, 'properties', expect.objectContaining({ latitude: 25.1, longitude: 55.2 }));
+    expect(db.insert).toHaveBeenNthCalledWith(2, 'properties', expect.not.objectContaining({ latitude: 25.1 }));
   });
 
   it('stores structured handoff details through the existing escalation summary field', async () => {

@@ -1,5 +1,6 @@
 const { getCrmAdapter } = require('../crm');
 const logger = require('../utils/logger');
+const { activeScenario } = require('../simulation/scenarios');
 
 const crm = getCrmAdapter();
 const PROFILE_TTL_MS = 5 * 60 * 1000;
@@ -26,8 +27,32 @@ function minimalProfile(customer) {
   };
 }
 
+// Test-console scenarios (simulation/scenarios.js) replace the profile; never
+// cached, never active for real traffic.
+async function simulatedProfile(customer) {
+  const scenario = activeScenario();
+  if (scenario === 'new_customer') {
+    return { ...minimalProfile({ ...customer, returningCustomer: false, name: null }), profileSource: 'simulation' };
+  }
+  if (scenario !== 'returning_customer') return null;
+  const services = typeof crm.getServices === 'function' ? await crm.getServices() : [];
+  const service = (services || [])[0];
+  const lastWeek = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  return {
+    ...minimalProfile({ ...customer, returningCustomer: true, name: customer.name || 'Aisha' }),
+    name: customer.name || 'Aisha',
+    recentBookings: service ? [{
+      id: 'sim-booking-1', reference: 'BK-SIM001', customerId: customer.id, serviceId: service.id,
+      scheduledDate: lastWeek, scheduledTime: '09:00:00', status: 'completed',
+    }] : [],
+    profileSource: 'simulation',
+  };
+}
+
 async function loadCustomerProfile(customer, { forceRefresh = false } = {}) {
   if (!customer || !customer.id) return null;
+  const simulated = await simulatedProfile(customer);
+  if (simulated) return simulated;
   const existing = cache.get(customer.id);
   if (!forceRefresh && existing && existing.expiresAt > Date.now()) {
     existing.profile.returningCustomer = !!customer.returningCustomer;

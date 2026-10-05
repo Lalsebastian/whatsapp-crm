@@ -12,13 +12,28 @@ const { CircuitBreaker } = require('../../reliability/circuitBreaker');
 // gemini-2.0-flash was retired by Google; gemini-3.8-flash is its
 // replacement (per the deprecation error's own guidance).
 const GEMINI_MODEL = 'gemini-3.8-flash';
-const breaker = new CircuitBreaker('Gemini', {
-  failureThreshold: reliability.PROVIDER_FAILURE_THRESHOLD,
-  cooldownMs: reliability.PROVIDER_COOLDOWN_MS,
-});
+// Optional second model, used only for difficult cases (see intentService).
+// Unset = no fallback, so each message costs at most the primary call.
+function fallbackModel() {
+  return process.env.GEMINI_FALLBACK_MODEL || '';
+}
 
-function geminiUrl() {
-  return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`;
+// One breaker per model, so an outage of the primary does not block the
+// fallback and vice versa.
+const breakers = new Map();
+function breakerFor(model) {
+  if (!breakers.has(model)) {
+    breakers.set(model, new CircuitBreaker(`Gemini:${model}`, {
+      failureThreshold: reliability.PROVIDER_FAILURE_THRESHOLD,
+      cooldownMs: reliability.PROVIDER_COOLDOWN_MS,
+    }));
+  }
+  return breakers.get(model);
+}
+const breaker = breakerFor(GEMINI_MODEL);
+
+function geminiUrl(model = GEMINI_MODEL) {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
 }
 
 function responseText(response) {
@@ -31,9 +46,9 @@ function responseText(response) {
 // Google's "high demand" 503s are common and usually clear within a second —
 // worth one quick retry rather than immediately giving up and showing the
 // customer a generic "didn't understand" fallback.
-async function requestOnce(prompt) {
+async function requestOnce(prompt, model) {
   const res = await axios.post(
-    geminiUrl(),
+    geminiUrl(model),
     {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0, responseMimeType: 'application/json' },
@@ -68,14 +83,15 @@ async function requestAudioOnce({ buffer, mimeType, prompt }) {
   return responseText(res);
 }
 
-async function callGemini(prompt) {
+async function callGemini(prompt, { model = GEMINI_MODEL } = {}) {
   if (!env.GEMINI_API_KEY) {
     throw new Error('GEMINI_API_KEY is not set');
   }
 
-  breaker.assertAvailable();
+  const modelBreaker = breakerFor(model);
+  modelBreaker.assertAvailable();
   try {
-    const result = await retry(() => requestOnce(prompt), {
+    const result = await retry(() => requestOnce(prompt, model), {
       retries: reliability.MAX_READ_RETRIES,
       baseDelayMs: reliability.RETRY_BASE_DELAY_MS,
       shouldRetry: isTransientError,
@@ -85,10 +101,10 @@ async function callGemini(prompt) {
         reason: error.code || (error.response && error.response.status) || error.message,
       }),
     });
-    breaker.recordSuccess();
+    modelBreaker.recordSuccess();
     return result;
   } catch (error) {
-    breaker.recordFailure();
+    modelBreaker.recordFailure();
     throw error;
   }
 }
@@ -115,4 +131,4 @@ async function callGeminiAudio(input) {
   }
 }
 
-module.exports = { callGemini, callGeminiAudio, GEMINI_MODEL };
+module.exports = { callGemini, callGeminiAudio, GEMINI_MODEL, fallbackModel };

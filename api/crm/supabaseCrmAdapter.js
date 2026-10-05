@@ -3,6 +3,8 @@
 // ahead of the client's real CRM API being documented (see httpCrmAdapter.js).
 const db = require('../db/supabaseClient');
 const { generateReference } = require('../utils/reference');
+const { todayInTimeZone, minutesNowInTimeZone, addDays } = require('../flows/dateUtils');
+const { normalizeSlots, minutesOf } = require('./slots');
 
 const DEFAULT_SLOTS = ['09:00', '11:00', '13:00', '15:00', '17:00'];
 const PREFERENCE_LANGUAGES = new Set(['en', 'ml', 'manglish', 'hi', 'hinglish']);
@@ -22,6 +24,8 @@ function mapProperty(row) {
     area: row.area,
     city: row.city,
     isDefault: !!row.is_default,
+    latitude: row.latitude ?? null,
+    longitude: row.longitude ?? null,
   };
 }
 
@@ -130,6 +134,11 @@ async function findCustomerByPhone(phone) {
   return { ...mapCustomer(Array.isArray(created) ? created[0] : created), returningCustomer: false };
 }
 
+async function getCustomerById(customerId) {
+  const rows = await db.get('customers', `id=eq.${encodeURIComponent(customerId)}&select=*&limit=1`);
+  return rows && rows.length > 0 ? mapCustomer(rows[0]) : null;
+}
+
 async function getCustomerProperties(customerId) {
   const rows = await db.get('properties', `customer_id=eq.${customerId}&select=*&order=is_default.desc,created_at.asc`);
   return (rows || []).map(mapProperty);
@@ -191,13 +200,32 @@ async function updateCustomerPreferences(customerId, { preferredLanguage, defaul
 }
 
 async function addProperty(customerId, property) {
-  const created = await db.insert('properties', {
+  const row = {
     customer_id: customerId,
     label: property.label || null,
     address_line: property.addressLine,
     area: property.area || null,
     city: property.city || 'Dubai',
-  });
+  };
+  const hasCoordinates = Number.isFinite(property.latitude) && Number.isFinite(property.longitude);
+  const located = hasCoordinates
+    ? {
+      ...row,
+      latitude: property.latitude,
+      longitude: property.longitude,
+      location_source: property.locationSource || null,
+      place_id: property.placeId || null,
+    }
+    : row;
+  let created;
+  try {
+    created = await db.insert('properties', located);
+  } catch (error) {
+    // Coordinates are an enhancement: if the columns from the geocoding
+    // migration are not there yet, still save the address itself.
+    if (!hasCoordinates || !db.isMissingColumn(error)) throw error;
+    created = await db.insert('properties', row);
+  }
   return mapProperty(Array.isArray(created) ? created[0] : created);
 }
 
@@ -219,20 +247,87 @@ async function checkServiceability(_serviceId, _location) {
   return { serviceable: true, source: 'crm_not_configured' };
 }
 
-async function getAvailability(serviceId, date) {
-  const bookedRows = await db.get(
-    'bookings',
-    `service_id=eq.${serviceId}&scheduled_date=eq.${date}&status=neq.cancelled&select=scheduled_time`
+// Builds structured slots for one day from the fixed slot grid: removes
+// times already booked for the service and, for today, times that have
+// already started in the business timezone.
+function slotsForDate(date, takenTimes, durationMinutes, now = new Date()) {
+  const today = todayInTimeZone(now);
+  if (date < today) return [];
+  const nowMinutes = date === today ? minutesNowInTimeZone(now) : -1;
+  return normalizeSlots(
+    DEFAULT_SLOTS.filter((slot) => !takenTimes.has(slot) && minutesOf(slot) > nowMinutes),
+    { date, durationMinutes: durationMinutes || null }
   );
-  const taken = new Set((bookedRows || []).map((r) => (r.scheduled_time || '').slice(0, 5)));
-  return DEFAULT_SLOTS.filter((slot) => !taken.has(slot));
 }
 
-async function createBooking({ customerId, propertyId, serviceId, date, time, notes }) {
+async function serviceDuration(serviceId) {
   const service = await getServiceDetails(serviceId);
-  const reference = generateReference('BK');
+  return service ? service.durationMinutes : null;
+}
+
+async function getAvailability(serviceId, date) {
+  const [bookedRows, durationMinutes] = await Promise.all([
+    db.get(
+      'bookings',
+      `service_id=eq.${encodeURIComponent(serviceId)}&scheduled_date=eq.${encodeURIComponent(date)}&status=neq.cancelled&select=scheduled_time`
+    ),
+    serviceDuration(serviceId),
+  ]);
+  const taken = new Set((bookedRows || []).map((r) => (r.scheduled_time || '').slice(0, 5)));
+  return slotsForDate(date, taken, durationMinutes);
+}
+
+// One query for the whole window instead of one per day.
+async function getAvailabilityRange(serviceId, { fromDate, days = 7 } = {}) {
+  const start = fromDate || todayInTimeZone();
+  const window = Math.min(Math.max(Number(days) || 7, 1), 31);
+  const end = addDays(start, window - 1);
+  const [bookedRows, durationMinutes] = await Promise.all([
+    db.get(
+      'bookings',
+      `service_id=eq.${encodeURIComponent(serviceId)}&scheduled_date=gte.${start}&scheduled_date=lte.${end}&status=neq.cancelled&select=scheduled_date,scheduled_time`
+    ),
+    serviceDuration(serviceId),
+  ]);
+  const takenByDate = new Map();
+  for (const row of bookedRows || []) {
+    if (!takenByDate.has(row.scheduled_date)) takenByDate.set(row.scheduled_date, new Set());
+    takenByDate.get(row.scheduled_date).add((row.scheduled_time || '').slice(0, 5));
+  }
+  const result = [];
+  for (let offset = 0; offset < window; offset += 1) {
+    const date = addDays(start, offset);
+    result.push({ date, slots: slotsForDate(date, takenByDate.get(date) || new Set(), durationMinutes) });
+  }
+  return result;
+}
+
+function slotUnavailableError(cause) {
+  const error = new Error('The selected time is no longer available');
+  error.code = 'SLOT_UNAVAILABLE';
+  error.cause = cause;
+  return error;
+}
+
+// Maps a PostgREST error raised by chatbot_create_bookings to a definitive
+// (non-retryable, non-uncertain) error code the booking flow understands.
+function mapBookingRpcError(error) {
+  const data = error && error.response && error.response.data;
+  const message = String((data && data.message) || '');
+  if (message.startsWith('SLOT_UNAVAILABLE')) return slotUnavailableError(error);
+  if (message.startsWith('INVALID_PROPERTY') || message.startsWith('INVALID_SERVICE')) {
+    const mapped = new Error(message);
+    mapped.code = message.split(':')[0];
+    mapped.cause = error;
+    return mapped;
+  }
+  return error;
+}
+
+async function insertBookingRow({ customerId, propertyId, serviceId, date, time, notes }) {
+  const service = await getServiceDetails(serviceId);
   const created = await db.insert('bookings', {
-    reference,
+    reference: generateReference('BK'),
     customer_id: customerId,
     property_id: propertyId,
     service_id: serviceId,
@@ -243,6 +338,66 @@ async function createBooking({ customerId, propertyId, serviceId, date, time, no
     notes: notes || null,
   });
   return mapBooking(Array.isArray(created) ? created[0] : created);
+}
+
+// Used only when the atomic function has not been deployed yet: creates the
+// bookings one by one and cancels the ones already created if a later one
+// fails, so the customer never ends up with half a multi-service booking.
+async function createBookingsSequentially(customerId, items) {
+  const created = [];
+  try {
+    for (const item of items) {
+      created.push(await insertBookingRow({ customerId, ...item }));
+    }
+    return created;
+  } catch (error) {
+    for (const booking of created) {
+      try {
+        await cancelBooking(booking.id);
+      } catch {
+        // Compensation is best effort; the uncertain-outcome path escalates.
+        error.uncertain = true;
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * All-or-nothing creation of one or more bookings for the same customer.
+ * Idempotent per idempotencyKey: repeating a key returns the bookings the
+ * first call created instead of creating new ones.
+ */
+async function createBookings({ customerId, items, idempotencyKey }) {
+  if (!customerId || !Array.isArray(items) || items.length === 0) {
+    throw new Error('createBookings requires customerId and at least one item');
+  }
+  try {
+    const rows = await db.rpc('chatbot_create_bookings', {
+      p_customer_id: customerId,
+      p_items: items.map((item) => ({
+        property_id: item.propertyId,
+        service_id: item.serviceId,
+        scheduled_date: item.date,
+        scheduled_time: item.time,
+        notes: item.notes || null,
+      })),
+      p_idempotency_key: idempotencyKey || null,
+    });
+    return (rows || []).map(mapBooking);
+  } catch (error) {
+    if (db.isMissingFunction(error)) return createBookingsSequentially(customerId, items);
+    throw mapBookingRpcError(error);
+  }
+}
+
+async function createBooking({ customerId, propertyId, serviceId, date, time, notes, idempotencyKey }) {
+  const [booking] = await createBookings({
+    customerId,
+    items: [{ propertyId, serviceId, date, time, notes }],
+    idempotencyKey,
+  });
+  return booking;
 }
 
 async function getBookings(customerId, { limit = 10 } = {}) {
@@ -281,16 +436,31 @@ async function cancelBooking(bookingId) {
   return mapBooking(Array.isArray(updated) ? updated[0] : updated);
 }
 
-async function createComplaint({ customerId, bookingId, category, description, attachments }) {
+const COMPLAINT_PRIORITIES = new Set(['low', 'normal', 'high', 'urgent']);
+
+async function createComplaint({ customerId, bookingId, category, description, priority, attachments }) {
   const reference = generateReference('CM');
-  const created = await db.insert('complaints', {
+  const row = {
     reference,
     customer_id: customerId,
     booking_id: bookingId || null,
     category,
     description: description || null,
     status: 'open',
-  });
+  };
+  let created;
+  if (COMPLAINT_PRIORITIES.has(priority)) {
+    try {
+      created = await db.insert('complaints', { ...row, priority });
+    } catch (error) {
+      // The priority column comes from the dashboard migration; without it
+      // the complaint is still recorded.
+      if (!db.isMissingColumn(error)) throw error;
+      created = await db.insert('complaints', row);
+    }
+  } else {
+    created = await db.insert('complaints', row);
+  }
   const complaint = mapComplaint(Array.isArray(created) ? created[0] : created);
 
   if (attachments && attachments.length > 0) {
@@ -311,6 +481,37 @@ async function createComplaint({ customerId, bookingId, category, description, a
   }
 
   return complaint;
+}
+
+// Appends a customer update (text and/or media) to an existing complaint
+// instead of opening a duplicate one.
+async function addComplaintDetails(complaintId, { customerId, text, attachments = [] } = {}) {
+  const rows = await db.get('complaints', `id=eq.${encodeURIComponent(complaintId)}&select=*&limit=1`);
+  const existing = rows && rows[0];
+  if (!existing || (customerId && existing.customer_id && String(existing.customer_id) !== String(customerId))) {
+    const error = new Error('Complaint not found for this customer');
+    error.code = 'COMPLAINT_NOT_FOUND';
+    throw error;
+  }
+  let updated = existing;
+  if (text && text.trim()) {
+    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const description = [existing.description, `[Customer update ${stamp} UTC] ${text.trim()}`].filter(Boolean).join('\n\n');
+    const patched = await db.patch('complaints', `id=eq.${encodeURIComponent(complaintId)}`, {
+      description,
+      updated_at: new Date().toISOString(),
+    });
+    updated = (Array.isArray(patched) ? patched[0] : patched) || existing;
+  }
+  for (const attachment of attachments) {
+    await db.insert('media_attachments', {
+      complaint_id: complaintId,
+      customer_id: existing.customer_id,
+      wa_media_id: attachment.waMediaId,
+      media_type: attachment.mediaType,
+    }, { returnRepresentation: false });
+  }
+  return mapComplaint(updated);
 }
 
 async function getComplaintStatus(reference) {
@@ -417,6 +618,7 @@ async function escalateToHuman({ customerId, phone, reason, summary, handoff }) 
 
 module.exports = {
   findCustomerByPhone,
+  getCustomerById,
   getCustomerProperties,
   getCustomerPreferences,
   updateCustomerPreferences,
@@ -425,13 +627,16 @@ module.exports = {
   getServiceDetails,
   checkServiceability,
   getAvailability,
+  getAvailabilityRange,
   createBooking,
+  createBookings,
   getBookings,
   getBookingStatus,
   getBookingById,
   rescheduleBooking,
   cancelBooking,
   createComplaint,
+  addComplaintDetails,
   getComplaintStatus,
   getOpenComplaintForBooking,
   getActiveComplaints,

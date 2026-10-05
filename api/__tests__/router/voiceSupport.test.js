@@ -232,4 +232,44 @@ describe('voice notes through the conversation router', () => {
     expect(mediaHandler.downloadWhatsAppMedia).toHaveBeenCalledTimes(1);
     expect(transcription.transcribeAudio).toHaveBeenCalledTimes(1);
   });
+
+  it('redacts a card number before the transcript is stored or sent to the AI', async () => {
+    sessionStore.getOrCreateSession.mockResolvedValue(session());
+    transcription.transcribeAudio.mockResolvedValue(voiceResult('Book AC service, my card is 4111 1111 1111 1111'));
+    intentService.detectIntent.mockResolvedValue({ intent: 'NEW_BOOKING', service: 'AC Service', language: 'en', confidence: 0.9 });
+    crmAdapter.getServices.mockResolvedValue([{ id: 'svc-ac', name: 'AC Service', category: 'ac' }]);
+
+    await handleInboundMessage(inbound('wamid-card-voice'));
+
+    expect(db.patch).toHaveBeenCalledWith('messages', 'wa_message_id=eq.wamid-card-voice', {
+      content: 'Book AC service, my card is [redacted card number]',
+      type: 'audio',
+    });
+    expect(intentService.detectIntent).toHaveBeenCalledWith('Book AC service, my card is [redacted card number]', expect.anything());
+    expect(JSON.stringify(sessionStore.setFlow.mock.calls)).not.toContain('4111');
+    expect(analytics.getTestEvents('971500').map((event) => event.eventType)).toContain('VOICE_TRANSCRIPT_REDACTED');
+  });
+
+  it('keeps only a placeholder in the message log when transcript storage is disabled', async () => {
+    const privacy = require('../../config/privacy');
+    privacy.STORE_VOICE_TRANSCRIPTS = false;
+    try {
+      sessionStore.getOrCreateSession.mockResolvedValue(session());
+      transcription.transcribeAudio.mockResolvedValue(voiceResult('I need plumber tomorrow'));
+      intentService.detectIntent.mockResolvedValue({ intent: 'NEW_BOOKING', service: 'Plumbing', language: 'en', confidence: 0.9 });
+      crmAdapter.getServices.mockResolvedValue([{ id: 'svc-plumbing', name: 'Plumbing', category: 'plumbing' }]);
+
+      await handleInboundMessage(inbound('wamid-no-store'));
+
+      expect(db.patch).toHaveBeenCalledWith('messages', 'wa_message_id=eq.wamid-no-store', { content: '[voice note]', type: 'audio' });
+      // The customer is still understood from the in-memory transcript (here
+      // fully by the rules, so without an AI call).
+      expect(sessionStore.setFlow).toHaveBeenCalledWith(
+        '971500', 'booking', 'awaiting_new_property', expect.objectContaining({ serviceId: 'svc-plumbing' })
+      );
+      expect(intentService.detectIntent).not.toHaveBeenCalled();
+    } finally {
+      privacy.STORE_VOICE_TRANSCRIPTS = true;
+    }
+  });
 });

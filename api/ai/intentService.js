@@ -8,10 +8,18 @@ const {
   buildServiceMatchPrompt,
   buildBookingCorrectionPrompt,
   buildHandoffSummaryPrompt,
+  buildImageReviewPrompt,
   INTENTS,
   COMPLAINT_CATEGORIES,
 } = require('./promptTemplates');
-const { callGemini, GEMINI_MODEL } = require('./providers/geminiProvider');
+const geminiProvider = require('./providers/geminiProvider');
+
+const { callGemini, GEMINI_MODEL } = geminiProvider;
+const messageBudget = require('../analytics/messageBudget');
+const { getRequestContext } = require('../reliability/requestContext');
+
+// Below this a primary answer is poor enough to justify the fallback model.
+const LOW_CONFIDENCE = 0.4;
 const logger = require('../utils/logger');
 
 const UNKNOWN_RESULT = Object.freeze({
@@ -70,19 +78,22 @@ function validate(parsed) {
   };
 }
 
-async function callTracked(taskType, prompt) {
+async function callTracked(taskType, prompt, { model = GEMINI_MODEL } = {}) {
   const startedAt = Date.now();
+  // Every model request is counted against the conversation for the
+  // AI-calls-per-booking cost analytics.
+  messageBudget.aiCall(getRequestContext().phone);
   logger.audit('AI_INTENT_REQUESTED', {
     provider: 'gemini',
-    model: GEMINI_MODEL,
+    model,
     taskType,
     result: 'requested',
   });
   try {
-    const raw = await callGemini(prompt);
+    const raw = await callGemini(prompt, model === GEMINI_MODEL ? undefined : { model });
     logger.audit('AI_INTENT_RESOLVED', {
       provider: 'gemini',
-      model: GEMINI_MODEL,
+      model,
       taskType,
       latencyMs: Date.now() - startedAt,
       result: 'success',
@@ -92,7 +103,7 @@ async function callTracked(taskType, prompt) {
     const timeout = ['OPERATION_TIMEOUT', 'ECONNABORTED', 'ETIMEDOUT'].includes(error.code);
     logger.audit(timeout ? 'AI_TIMEOUT' : 'AI_ERROR', {
       provider: 'gemini',
-      model: GEMINI_MODEL,
+      model,
       taskType,
       latencyMs: Date.now() - startedAt,
       errorCategory: timeout ? 'AI_PROVIDER_TIMEOUT' : 'AI_PROVIDER_ERROR',
@@ -103,25 +114,59 @@ async function callTracked(taskType, prompt) {
   }
 }
 
-async function detectIntent(text, context = {}) {
+function errorDetail(err) {
+  return err.response ? `Gemini ${err.response.status}: ${JSON.stringify(err.response.data)}` : err.message;
+}
+
+// One attempt with a given model: validated result, or { failure } when the
+// call errored or the answer could not be used.
+async function attemptIntent(prompt, taskType, model) {
   try {
-    const prompt = buildIntentPrompt(text, context);
-    const raw = await callTracked('intent_detection', prompt);
-    const parsed = safeParseJson(raw);
-    const validated = validate(parsed);
-    if (!validated) {
-      logger.audit('AI_FALLBACK_USED', { taskType: 'intent_detection', reason: 'invalid_response', result: 'fallback' });
-      logger.warn('AI', 'Unparseable/invalid intent response — falling back to UNKNOWN:', raw);
-      // debugReason is extra, dev-only diagnostic info — surfaced by
-      // /api/chat/test, never sent to a real WhatsApp customer.
-      return { ...UNKNOWN_RESULT, debugReason: `Unparseable response from model: ${String(raw).slice(0, 300)}` };
-    }
-    return validated;
+    const raw = await callTracked(taskType, prompt, { model });
+    const validated = validate(safeParseJson(raw));
+    return validated ? { result: validated } : { failure: `Unparseable response from model: ${String(raw).slice(0, 300)}`, unparseable: true };
   } catch (err) {
-    const detail = err.response ? `Gemini ${err.response.status}: ${JSON.stringify(err.response.data)}` : err.message;
-    logger.error('AI', 'Intent detection failed:', detail);
-    return { ...UNKNOWN_RESULT, debugReason: detail };
+    return { failure: errorDetail(err) };
   }
+}
+
+/**
+ * Intent detection with a bounded escalation ladder, so a message never pays
+ * for more than it needs:
+ *   1. primary model
+ *   2. primary model again, only if the first answer was unparseable
+ *   3. fallback model (fallbackModel, optional), only if the primary
+ *      failed twice, errored, or answered with very low confidence
+ */
+async function detectIntent(text, context = {}) {
+  const prompt = buildIntentPrompt(text, context);
+  let attempt = await attemptIntent(prompt, 'intent_detection', GEMINI_MODEL);
+  if (attempt.unparseable) {
+    logger.audit('AI_FALLBACK_USED', { taskType: 'intent_detection', reason: 'invalid_response_retry', result: 'retry' });
+    attempt = await attemptIntent(prompt, 'intent_detection_retry', GEMINI_MODEL);
+  }
+
+  const poor = attempt.result && attempt.result.confidence < LOW_CONFIDENCE;
+  const fallbackModel = geminiProvider.fallbackModel();
+  if (fallbackModel && (attempt.failure || poor)) {
+    const fallback = await attemptIntent(prompt, 'intent_detection_fallback_model', fallbackModel);
+    logger.audit('AI_FALLBACK_MODEL_USED', {
+      taskType: 'intent_detection',
+      model: fallbackModel,
+      reason: attempt.failure ? 'primary_failed' : 'primary_low_confidence',
+      result: fallback.result ? 'success' : 'failed',
+    });
+    if (fallback.result && (!attempt.result || fallback.result.confidence > attempt.result.confidence)) {
+      return { ...fallback.result, model: fallbackModel };
+    }
+  }
+
+  if (attempt.result) return attempt.result;
+  logger.audit('AI_FALLBACK_USED', { taskType: 'intent_detection', reason: 'invalid_response', result: 'fallback' });
+  logger.warn('AI', 'Intent detection unusable — falling back to UNKNOWN:', attempt.failure);
+  // debugReason is extra, dev-only diagnostic info — surfaced by
+  // /api/chat/test, never sent to a real WhatsApp customer.
+  return { ...UNKNOWN_RESULT, debugReason: attempt.failure };
 }
 
 async function classifyComplaintCategory(text, context = {}) {
@@ -199,6 +244,31 @@ async function analyzeBookingCorrection(text, context = {}) {
   }
 }
 
+function boundedText(value, max) {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;
+}
+
+/**
+ * Agent assist for a handoff, in one model call.
+ * @returns {Promise<{summary: string, suggestedReply: string|null, nextAction: string|null}|null>}
+ */
+async function assistHandoff(handoff) {
+  try {
+    const raw = await callTracked('handoff_assist', buildHandoffSummaryPrompt(handoff));
+    const parsed = safeParseJson(raw);
+    const summary = parsed && boundedText(parsed.summary, 1000);
+    if (!summary) return null;
+    return {
+      summary,
+      suggestedReply: boundedText(parsed.suggestedReply, 600),
+      nextAction: boundedText(parsed.nextAction, 300),
+    };
+  } catch (err) {
+    logger.error('AI', 'Handoff assist generation failed:', errorDetail(err));
+    return null;
+  }
+}
+
 async function summarizeHandoff(handoff) {
   try {
     const raw = await callTracked('handoff_summary', buildHandoffSummaryPrompt(handoff));
@@ -212,7 +282,46 @@ async function summarizeHandoff(handoff) {
   }
 }
 
+const IMAGE_RELEVANCE = new Set(['relevant', 'unclear', 'unrelated']);
+
+/**
+ * Describes a complaint photo (what is visible, whether it is relevant,
+ * whether it shows a personal document). Never a diagnosis.
+ * @returns {Promise<{relevance, subject, containsSensitiveDocument, confidence}|null>} null when unavailable
+ */
+async function analyzeComplaintImage({ buffer, mimeType, issue }) {
+  const startedAt = Date.now();
+  messageBudget.aiCall(getRequestContext().phone);
+  try {
+    const raw = await geminiProvider.callGeminiAudio({ buffer, mimeType, prompt: buildImageReviewPrompt({ issue }) });
+    const parsed = safeParseJson(raw);
+    if (!parsed || !IMAGE_RELEVANCE.has(parsed.relevance)) {
+      logger.warn('AI', 'Unusable image review response:', String(raw).slice(0, 200));
+      return null;
+    }
+    logger.audit('AI_IMAGE_REVIEWED', {
+      provider: 'gemini',
+      taskType: 'image_review',
+      relevance: parsed.relevance,
+      sensitive: !!parsed.containsSensitiveDocument,
+      latencyMs: Date.now() - startedAt,
+      result: 'success',
+    });
+    return {
+      relevance: parsed.relevance,
+      subject: typeof parsed.subject === 'string' ? parsed.subject.trim().slice(0, 100) : '',
+      containsSensitiveDocument: parsed.containsSensitiveDocument === true,
+      confidence: typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0,
+    };
+  } catch (err) {
+    logger.error('AI', 'Image review failed:', errorDetail(err));
+    return null;
+  }
+}
+
 module.exports = {
+  analyzeComplaintImage,
+  assistHandoff,
   detectIntent,
   classifyComplaintCategory,
   matchServiceToCatalog,

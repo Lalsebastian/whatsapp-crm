@@ -21,6 +21,10 @@
   button[type=submit] { padding: 0.5rem 1rem; border-radius: 6px; border: none; background: #2563eb; color: white; cursor: pointer; }
   #reset-session { margin: 0 0 0.8rem; padding: 0.45rem 0.8rem; border-radius: 6px; border: 1px solid #dc2626; background: transparent; color: #fca5a5; cursor: pointer; }
   #feedback-tools { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; }
+  #sim-tools { border: 1px solid #333; border-radius: 8px; padding: 0.6rem; margin-bottom: 0.8rem; }
+  #sim-tools .row { display: flex; gap: 0.5rem; }
+  #scenario { flex: 1; padding: 0.45rem; border-radius: 6px; border: 1px solid #444; background: #16181d; color: #eee; }
+  #run-preset { padding: 0.45rem 0.8rem; border-radius: 6px; border: 1px solid #16a34a; background: transparent; color: #86efac; cursor: pointer; }
   #start-feedback { padding: 0.45rem 0.8rem; border-radius: 6px; border: 1px solid #2563eb; background: transparent; color: #8ab4f8; cursor: pointer; }
   button[type=submit]:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
   label { font-size: 0.8rem; opacity: 0.7; }
@@ -43,6 +47,14 @@
   <input id="feedback-booking-id" type="text" placeholder="Completed booking ID" />
   <button id="start-feedback" type="button">Start Feedback</button>
 </div>
+<div id="sim-tools" hidden>
+  <label for="scenario">Simulation scenario (applies to every message while selected)</label>
+  <div class="row">
+    <select id="scenario"><option value="">None: real behaviour</option></select>
+    <button id="run-preset" type="button">Run Preset</button>
+  </div>
+  <p class="hint" id="scenario-help">Pick a scenario, then Run Preset to reset the session and send its first message.</p>
+</div>
 <div id="log"></div>
 <form id="form">
   <input id="message" type="text" placeholder="Type a message…" autocomplete="off" />
@@ -61,6 +73,11 @@ const resetButton = document.getElementById('reset-session');
 const feedbackTools = document.getElementById('feedback-tools');
 const feedbackBookingInput = document.getElementById('feedback-booking-id');
 const startFeedbackButton = document.getElementById('start-feedback');
+const simTools = document.getElementById('sim-tools');
+const scenarioSelect = document.getElementById('scenario');
+const scenarioHelp = document.getElementById('scenario-help');
+const runPresetButton = document.getElementById('run-preset');
+let scenarios = [];
 
 function setAvailability(enabled, message) {
   statusEl.textContent = message;
@@ -69,7 +86,33 @@ function setAvailability(enabled, message) {
   submitButton.disabled = !enabled;
   resetButton.hidden = !enabled;
   feedbackTools.hidden = !enabled;
+  simTools.hidden = !enabled;
 }
+
+async function loadScenarios() {
+  const secret = secretInput.value;
+  if (!secret || scenarios.length) return;
+  try {
+    const res = await fetch('/api/chat/test/scenarios', { headers: { 'x-test-chat-secret': secret }, cache: 'no-store' });
+    if (!res.ok) return;
+    scenarios = (await res.json()).scenarios || [];
+    for (const scenario of scenarios) {
+      const option = document.createElement('option');
+      option.value = scenario.id;
+      option.textContent = scenario.label;
+      scenarioSelect.appendChild(option);
+    }
+  } catch (err) {
+    scenarioHelp.textContent = 'Could not load scenarios: ' + err.message;
+  }
+}
+
+secretInput.addEventListener('change', loadScenarios);
+scenarioSelect.addEventListener('focus', loadScenarios);
+scenarioSelect.addEventListener('change', () => {
+  const scenario = scenarios.find((item) => item.id === scenarioSelect.value);
+  scenarioHelp.textContent = scenario ? scenario.description : 'Real behaviour: no simulation applied.';
+});
 
 async function checkAvailability() {
   try {
@@ -142,7 +185,10 @@ async function sendMessage({ message, buttonId, label }) {
         'Content-Type': 'application/json',
         'x-test-chat-secret': secret,
       },
-      body: JSON.stringify(buttonId ? { phone, buttonId } : { phone, message }),
+      body: JSON.stringify(Object.assign(
+        buttonId ? { phone, buttonId } : { phone, message },
+        scenarioSelect.value ? { scenario: scenarioSelect.value } : {}
+      )),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -156,7 +202,7 @@ async function sendMessage({ message, buttonId, label }) {
       }
       return;
     }
-    let meta = 'intent=' + data.intent + ' flow=' + data.flow + ' step=' + data.step + ' confidence=' + data.confidence;
+    let meta = (scenarioSelect.value ? '[scenario: ' + scenarioSelect.value + '] ' : '') + 'intent=' + data.intent + ' flow=' + data.flow + ' step=' + data.step + ' confidence=' + data.confidence;
     if (data.service) meta += '\nservice=' + data.service;
     if (data.matchSource) meta += '\nmatch=' + data.matchSource;
     if (data.serviceConfidence !== null) meta += '\nserviceConfidence=' + data.serviceConfidence;
@@ -265,6 +311,32 @@ startFeedbackButton.addEventListener('click', async () => {
   } catch (err) {
     addMessage('bot', 'Request failed: ' + err.message);
   }
+});
+
+async function resetSession(phone, secret) {
+  const res = await fetch('/api/chat/test/reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-test-chat-secret': secret },
+    body: JSON.stringify({ phone }),
+  });
+  return res.ok;
+}
+
+runPresetButton.addEventListener('click', async () => {
+  await loadScenarios();
+  const scenario = scenarios.find((item) => item.id === scenarioSelect.value);
+  const secret = secretInput.value;
+  if (!scenario || !secret) {
+    addMessage('bot', 'Enter the developer secret and choose a scenario first.');
+    return;
+  }
+  if (scenario.freshPhone) {
+    phoneInput.value = '9715' + String(Math.floor(10000000 + Math.random() * 89999999));
+  }
+  await resetSession(phoneInput.value.trim(), secret);
+  log.replaceChildren();
+  addMessage('bot', 'Scenario: ' + scenario.label + '. ' + scenario.description);
+  await sendMessage({ message: scenario.starter });
 });
 
 checkAvailability();

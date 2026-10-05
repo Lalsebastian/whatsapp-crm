@@ -39,4 +39,33 @@ describe('chatbot message-efficiency analytics', () => {
       fastPathBookingRate: 0.5,
     });
   });
+
+  it('reports message cost per booking and complaint and the AI calls avoided', () => {
+    const occurred_at = '2026-10-01T10:00:00.000Z';
+    const events = [
+      { event_type: 'BOOKING_COST_SUMMARY', occurred_at, metadata: { botMessages: 4, aiCalls: 0, templateMessages: 0, estimatedCost: 0, currency: 'USD' } },
+      { event_type: 'BOOKING_COST_SUMMARY', occurred_at, metadata: { botMessages: 6, aiCalls: 2, templateMessages: 1, estimatedCost: 0.0163, currency: 'USD' } },
+      { event_type: 'COMPLAINT_COST_SUMMARY', occurred_at, metadata: { botMessages: 5, aiCalls: 1, templateMessages: 0, estimatedCost: 0.0003, currency: 'USD' } },
+      { event_type: 'AI_CALL_AVOIDED', occurred_at, metadata: {} },
+      { event_type: 'AI_CALL_AVOIDED', occurred_at, metadata: {} },
+      { event_type: 'AI_CALL_AVOIDED', occurred_at, metadata: {} },
+      { event_type: 'AI_INTENT_REQUESTED', occurred_at, metadata: {} },
+    ];
+
+    const { cost } = aggregateChatbotAnalytics(events, [], { range: 'today', now: new Date('2026-10-01T12:00:00.000Z') });
+
+    expect(cost).toMatchObject({
+      currency: 'USD',
+      bookingsMeasured: 2,
+      complaintsMeasured: 1,
+      averageBotMessagesPerBooking: 5,
+      averageAiCallsPerBooking: 1,
+      averageCostPerBooking: 0.00815,
+      totalEstimatedCost: 0.0166,
+      templateMessages: 1,
+      aiCallsMade: 1,
+      aiCallsAvoided: 3,
+      aiAvoidanceRate: 0.75,
+    });
+  });
 });

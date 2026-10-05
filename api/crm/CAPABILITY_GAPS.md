@@ -1,57 +1,91 @@
-# Client CRM capabilities still required
+# Client CRM capabilities: status
 
-The WhatsApp flow uses the existing `CrmAdapter` contract and does not invent
-client endpoints. These capabilities need client API documentation before they
-can be implemented safely:
+The chatbot talks to the CRM only through the `CrmAdapter` contract
+(`api/crm/CrmAdapter.js`). The REST contract the HTTP adapter expects from the
+client's CRM is in [`HTTP_CRM_CONTRACT.md`](./HTTP_CRM_CONTRACT.md).
 
-- **Atomic multi-service booking:** the current API accepts one service per
-  `createBooking` call. The WhatsApp session can collect several services, but
-  final persistence is sequential and cannot guarantee an all-or-nothing
-  transaction. A bulk endpoint with an idempotency key is recommended.
-- **OTP verification:** no send/verify OTP methods or verification requirement
-  are present. WhatsApp sender identity is used for customer lookup today.
-- **Location/geocoding:** no API converts a WhatsApp latitude/longitude payload
-  into a validated service address. Customers must select a saved address or
-  type a complete address.
-- **Date discovery:** availability currently accepts one service and one date.
-  A date-range endpoint is needed to present upcoming dates backed by actual
-  booking rules rather than guessed dates.
-- **Slot metadata:** availability returns strings only. Structured start/end
-  timestamps and timezone data are needed for authoritative range formatting.
-- **Technician tracking:** bookings expose status but no technician name,
-  assignment, live location, or ETA. Those values must come from CRM and must
-  never be inferred by the chatbot.
-- **Booking lifecycle webhooks/events:** assignment, on-the-way, completion,
-  reminders, and feedback automation need documented CRM events or polling
-  endpoints. No scheduler or n8n workflow is added by this enhancement.
-- **Real HTTP adapter:** `httpCrmAdapter.js` remains intentionally unimplemented
-  until the client supplies endpoint paths, authentication, request schemas,
-  response schemas, and error/idempotency behavior.
+## Implemented
 
-## Production reliability limitations
+- **Real HTTP adapter** (`httpCrmAdapter.js`, `CRM_PROVIDER=http`): implements
+  every contract method against the documented REST contract. Paths and the
+  auth header are configurable. The server refuses to start with an invalid
+  configuration. **Still needed from the client:** confirmation that their API
+  matches the contract, or their real endpoint docs so paths and field mapping
+  can be aligned.
+- **Atomic multi-service booking:** `createBookings` is one all-or-nothing call
+  with an idempotency key. In Supabase mode it is the `chatbot_create_bookings`
+  database function, which also locks the slot so two customers cannot book
+  the same time. In HTTP mode the CRM's `POST /bookings/batch` must be atomic.
+- **Date discovery:** `getAvailabilityRange` lists upcoming dates that have
+  open slots (`BOOKING_DATE_WINDOW_DAYS`, default 7). If the CRM cannot answer,
+  the flow falls back to asking for a date.
+- **Slot metadata:** slots carry id, start/end, ISO instants and timezone.
+  Customers see ranges ("9:00 AM – 11:00 AM"), the CRM receives the chosen
+  `slotId`, and past slots for today are never offered.
+- **Booking lifecycle events:** `POST /api/crm/events` (signed) handles
+  technician assigned, on the way, and completed. Completion starts the
+  existing feedback flow after re-checking the booking in the CRM.
+  Notifications outside the 24-hour window use approved templates. For the
+  bundled Supabase dashboard, a Supabase Database Webhook on `bookings` UPDATEs
+  drives the same events.
+- **Location pins → addresses:** WhatsApp pins are reverse-geocoded (Google or
+  Nominatim, off by default). The customer confirms the address and adds
+  building/flat details, and coordinates are stored on the property.
+- **Durable idempotency and cross-instance coordination:** see below.
+- **Complaint updates:** "Add Details" appends text, voice notes and photos to
+  an open complaint (`addComplaintDetails`) instead of opening a duplicate.
+- **Complaint priority:** set from the severity check; needs the `priority`
+  column from section 7 of the reliability migration (falls back without it).
+- **Escalation SLA:** `api/escalation/slaMonitor.js` raises overdue handoffs one
+  priority level and sends the customer one reassurance (inside the 24-hour
+  window only). Bundled Supabase CRM only; with an external CRM its own queue
+  owns SLAs.
+- **Add-on suggestions:** use only services in the CRM catalogue that the CRM
+  says are serviceable at the address; off by default.
 
-- Apply the additive `processed_webhook_events` definition in
-  `api/db/schema.sql` before deployment. Until that table exists, webhook
-  message-ID deduplication falls back to a single-process, 24-hour memory cache.
-- The CRM contract has no idempotency-key field or lookup-by-idempotency-key
-  endpoint. Booking and complaint double-submit protection is therefore
-  application-level and process-local; it cannot guarantee exactly-once writes
-  across multiple instances or a process restart.
-- Per-customer processing locks, out-of-order timestamp tracking, and provider
-  circuit breakers are process-local. Multi-instance deployment requires a
-  distributed lock/order store such as Postgres advisory locks or Redis.
-- A timed-out CRM write is treated as an uncertain outcome and is never
-  automatically retried. A CRM lookup by idempotency key is required for
-  automated reconciliation.
+## Still required from the client
+
+- **OTP verification:** on hold until the client confirms the requirement
+  (WhatsApp sender identity is used for customer lookup today).
+- **Technician tracking data:** the bot shows technician names and ETAs only
+  when lifecycle events include them. Live location is not supported.
+- **Reminders** (e.g. day-before) are not implemented; they would use the same
+  template mechanism as lifecycle events once the client defines them.
+
+## Production reliability
+
+- Apply `supabase/migrations/202610040001_chatbot_reliability_lifecycle.sql`
+  and set `SUPABASE_SERVICE_ROLE_KEY`. With `COORDINATION_BACKEND=postgres`
+  (the production default), these are shared by every instance through
+  Postgres:
+  - the per-customer conversation lock (a renewable lease row)
+  - newest-message ordering
+  - durable idempotency claims for bookings, complaints and feedback
+
+  Plain `pg_advisory_lock` is not used because PostgREST runs each call on a
+  pooled connection in its own transaction. Without the migration, each
+  primitive falls back to process-local behaviour and logs a warning.
+- Webhook message-ID deduplication uses `processed_webhook_events` from
+  `api/db/schema.sql`.
+- A timed-out CRM write is still treated as an uncertain outcome and never
+  retried automatically. Staff get a handoff to verify it. With the HTTP
+  adapter, the CRM honouring `Idempotency-Key` makes a manual retry safe.
+- Circuit breakers stay per instance by design: each instance protects itself
+  from a failing provider.
 
 ## Voice-note retention and privacy
 
-- Voice bytes are downloaded into memory for transcription and are not written
-  to Render's filesystem or duplicated into Supabase storage.
-- Complaint records can retain the original WhatsApp media ID as an `audio`
-  attachment. Meta download URLs are short-lived, so durable playback for human
-  agents requires an approved storage and retention policy that the current CRM
-  contract does not provide.
-- Transcripts are handled like existing inbound message text and may be stored
-  in the message log or complaint description. Production policy should define
-  transcript retention, agent access, deletion, and customer privacy handling.
+- Voice bytes are processed in memory only. They are never written to disk or
+  copied to Supabase storage.
+- Transcripts are redacted before storage, AI processing or staff handoff
+  (card numbers with a Luhn check, Emirates ID, UAE IBAN;
+  `REDACT_SENSITIVE_DATA`). They can be kept out of the message log entirely
+  (`STORE_VOICE_TRANSCRIPTS=false`).
+- A daily job (`chatbot_apply_retention`, single-instance through a lease)
+  does three things:
+  - replaces stored voice transcripts older than `VOICE_TRANSCRIPT_RETENTION_DAYS`
+  - deletes voice-note media references older than `VOICE_MEDIA_RETENTION_DAYS`
+  - purges bookkeeping rows older than `CHATBOT_STATE_RETENTION_DAYS`
+- Not covered: transcript text that a customer's own words placed into a
+  complaint description or an escalation summary. Those are business records,
+  and their retention follows the CRM's record policy.

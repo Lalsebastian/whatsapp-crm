@@ -1,3 +1,6 @@
+const { clearFamily, rankFamilies, urgentReason } = require('./serviceSynonyms');
+const { detectShortcut } = require('./shortcuts');
+
 const ROOM_PATTERNS = [
   ['kitchen', /\bkitchen\b/i],
   ['bathroom', /\b(?:bathroom|washroom|toilet)\b/i],
@@ -59,20 +62,30 @@ function normalizeCustomerMessage(text, ai = {}) {
   const value = String(text || '').trim();
   const lower = value.toLowerCase();
   const room = ai.room || firstMatch(value, ROOM_PATTERNS);
-  const inferredService = firstMatch(value, SERVICE_SIGNALS);
+  const shortcut = detectShortcut(value);
+  // The synonym dictionary decides the service; the regex list is only a
+  // fallback for wording it does not know yet.
+  const family = clearFamily(value);
+  const inferredService = family ? family.label : (rankFamilies(value).length > 1 ? null : firstMatch(value, SERVICE_SIGNALS));
   const complaintReference = ai.complaintReference || (value.match(/\bCM-[A-Z0-9-]+\b/i) || [])[0] || null;
   const bookingReference = ai.bookingReference || (value.match(/\bBK-[A-Z0-9-]+\b/i) || [])[0] || null;
-  const repeatProblem = /\b(?:still|again|returned|back|same issue|repeat)\b/i.test(value);
+  const repeatProblem = (shortcut && shortcut.repeatProblem) || /\b(?:still|again|returned|back|same issue|repeat)\b/i.test(value);
   const complaintSignal = /\b(?:complaint|damag(?:e|ed)|refund|rude|late|yesterday).*(?:still|again|not|issue|problem|leak)/i.test(value)
     || repeatProblem;
-  const issueSignal = SERVICE_SIGNALS.some(([, pattern]) => pattern.test(value));
-  const deterministicIntent = complaintSignal
-    ? 'COMPLAINT'
-    : (room || inferredService || issueSignal ? 'NEW_BOOKING' : null);
+  const issueSignal = rankFamilies(value).length > 0 || SERVICE_SIGNALS.some(([, pattern]) => pattern.test(value));
+  const ruleIntent = shortcut ? shortcut.intent : null;
+  const deterministicIntent = ruleIntent && ruleIntent !== 'NEW_BOOKING'
+    ? ruleIntent
+    : (complaintSignal ? 'COMPLAINT' : (room || inferredService || issueSignal || ruleIntent ? 'NEW_BOOKING' : null));
+  const ruleConfidence = shortcut ? shortcut.confidence : (deterministicIntent ? (inferredService ? 0.95 : 0.82) : 0);
   const language = ai.language || (/\b(?:nale|naale|aanu|venam|illa|potti|ravile|vaikunneram)\b/i.test(value) ? 'manglish' : 'en');
+  // A clear, explicit command ("cancel my booking", "talk to a human") beats
+  // a model's reading; otherwise the model's intent is preferred when it has one.
+  const strongRule = shortcut && shortcut.confidence >= 0.94 && shortcut.intent !== 'NEW_BOOKING';
+  const aiIntent = ai.intent && ai.intent !== 'UNKNOWN' ? ai.intent : null;
 
   return {
-    intent: ai.intent && ai.intent !== 'UNKNOWN' ? ai.intent : (deterministicIntent || ai.intent || 'UNKNOWN'),
+    intent: strongRule ? shortcut.intent : (aiIntent || deterministicIntent || ai.intent || 'UNKNOWN'),
     service: ai.service || inferredService,
     serviceId: ai.serviceId || null,
     room,
@@ -84,9 +97,11 @@ function normalizeCustomerMessage(text, ai = {}) {
     bookingReference,
     complaintReference,
     language,
-    urgency: ai.urgency || (/\b(?:urgent|emergency|immediately|asap|flooding|sparking)\b/i.test(lower) ? 'urgent' : 'normal'),
-    confidence: Math.max(Number(ai.confidence) || 0, deterministicIntent ? (inferredService ? 0.95 : 0.82) : 0),
+    urgency: ai.urgency || (/\b(?:urgent|emergency|immediately|asap|flooding|sparking)\b/i.test(lower) || urgentReason(value) ? 'urgent' : 'normal'),
+    confidence: strongRule ? shortcut.confidence : Math.max(Number(ai.confidence) || 0, deterministicIntent ? ruleConfidence : 0),
     repeatProblem,
+    ambiguousService: !inferredService && rankFamilies(value).length > 1,
+    serviceCandidates: rankFamilies(value).map((item) => item.label),
   };
 }
 

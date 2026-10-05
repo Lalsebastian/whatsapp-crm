@@ -15,6 +15,62 @@ services:
         sync: false
       - key: WHATSAPP_VERIFY_TOKEN
         sync: false
+      # Meta App Secret: required. Webhook deliveries are rejected (503, Meta
+      # retries) until it is set.
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      # Approved message templates for business-initiated messages (optional;
+      # without them, lifecycle messages outside the 24h window are skipped).
+      - key: WHATSAPP_TEMPLATE_LANGUAGE
+        value: en
+      - key: WHATSAPP_TEMPLATE_BOOKING_ASSIGNED
+        sync: false
+      - key: WHATSAPP_TEMPLATE_TECHNICIAN_ON_THE_WAY
+        sync: false
+      - key: WHATSAPP_TEMPLATE_FEEDBACK_REQUEST
+        sync: false
+      # Booking lifecycle events from the CRM (POST /api/crm/events).
+      - key: CRM_WEBHOOK_SECRET
+        sync: false
+      - key: BUSINESS_TIMEZONE
+        value: Asia/Dubai
+      # Cross-instance locks/dedupe in Postgres (needs the reliability migration
+      # and SUPABASE_SERVICE_ROLE_KEY).
+      - key: COORDINATION_BACKEND
+        value: postgres
+      # Conversation intelligence (see .env.example for details).
+      - key: GEMINI_FALLBACK_MODEL
+        sync: false
+      - key: IMAGE_ANALYSIS_ENABLED
+        value: "false"
+      - key: SERVICE_BUNDLES_ENABLED
+        value: "false"
+      - key: DRAFT_RESUME_HOURS
+        value: "72"
+      - key: ESCALATION_SLA_MONITOR_ENABLED
+        value: "true"
+      - key: COST_CURRENCY
+        value: USD
+      # Reverse geocoding for location pins: none | google | nominatim.
+      - key: GEOCODING_PROVIDER
+        value: none
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: NOMINATIM_CONTACT_EMAIL
+        sync: false
+      # Voice-data privacy and retention.
+      - key: STORE_VOICE_TRANSCRIPTS
+        value: "true"
+      - key: REDACT_SENSITIVE_DATA
+        value: "true"
+      - key: VOICE_TRANSCRIPT_RETENTION_DAYS
+        value: "90"
+      - key: VOICE_MEDIA_RETENTION_DAYS
+        value: "30"
+      - key: RETENTION_JOB_ENABLED
+        value: "true"
+      - key: ANALYTICS_HASH_SALT
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
@@ -31,6 +87,12 @@ services:
         sync: false
       - key: CRM_PROVIDER
         value: supabase
+      # Only for CRM_PROVIDER=http: header carrying CLIENT_API_KEY and optional
+      # JSON path overrides (see api/crm/HTTP_CRM_CONTRACT.md).
+      - key: CLIENT_API_AUTH_HEADER
+        value: Authorization
+      - key: CLIENT_API_ENDPOINTS
+        sync: false
 
   - type: static_site
     name: whatsapp-crm-frontend
