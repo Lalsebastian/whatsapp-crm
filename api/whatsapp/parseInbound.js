@@ -89,9 +89,15 @@ function parseWebhookBody(rawBody, { phoneNumberId } = {}) {
         ignored.push({ reason: 'other_phone_number', phoneNumberId: String(target) });
         continue;
       }
+      // The sender's WhatsApp profile name arrives beside the messages.
+      const profileNames = new Map((Array.isArray(value.contacts) ? value.contacts : [])
+        .filter((contact) => contact && contact.wa_id && contact.profile && contact.profile.name)
+        .map((contact) => [String(contact.wa_id), String(contact.profile.name).trim().slice(0, 100)]));
       for (const msg of Array.isArray(value.messages) ? value.messages : []) {
         const normalized = normalizeMessage(msg);
-        if (normalized) messages.push(normalized);
+        if (!normalized) continue;
+        const profileName = profileNames.get(String(normalized.from));
+        messages.push(profileName ? { ...normalized, profileName } : normalized);
       }
     }
   }

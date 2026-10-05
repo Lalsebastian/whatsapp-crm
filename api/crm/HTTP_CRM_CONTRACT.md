@@ -35,7 +35,7 @@ response shapes need a small change in `httpCrmAdapter.js`.
 | Method | Default path | Request | Response |
 |---|---|---|---|
 | `findCustomerByPhone` | `GET /customers?phone={phone}` | phone in WhatsApp international format without `+`, e.g. `971501234567` | Array of customers (empty if none) |
-| `createCustomer` | `POST /customers` | `{ "phone": "...", "source": "whatsapp" }` | The created customer. `409` if it already exists (the bot then re-reads it) |
+| `createCustomer` | `POST /customers` | `{ "phone": "...", "source": "whatsapp", "name"? }` (`name` is the WhatsApp profile name, when the customer has one) | The created customer. `409` if it already exists (the bot then re-reads it) |
 | `getCustomerById` | `GET /customers/{customerId}` | | Customer, or `404` |
 | `getCustomerPreferences` | `GET /customers/{customerId}/preferences` | | `{ "preferredLanguage": "en", "defaultPropertyId": "..." }`, or `404` |
 | `updateCustomerPreferences` | `PATCH /customers/{customerId}/preferences` | `{ "preferredLanguage"?: "en|ml|manglish|hi|hinglish", "defaultPropertyId"?: "..." }` | Updated preferences |

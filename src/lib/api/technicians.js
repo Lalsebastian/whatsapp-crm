@@ -31,7 +31,7 @@ export async function updateTechnician(id, patch) {
 export async function listTechnicianJobs({ technicianId, start, end, statuses } = {}) {
   let query = select(
     'bookings',
-    '*, service:services(id, name, category, duration_minutes), customer:customers(id, name, phone), property:properties(id, label, address_line, area, city), technician:technicians(id, name, phone)'
+    '*, service:services(id, name, category, duration_minutes), customer:customers(id, name, phone), property:properties(*), technician:technicians(id, name, phone)'
   ).eq('technician_id', technicianId);
 
   if (Array.isArray(statuses) && statuses.length) query = query.in('status', statuses);
@@ -45,7 +45,7 @@ export async function getJob(bookingId) {
   return unwrap(
     await select(
       'bookings',
-      '*, service:services(id, name, category, duration_minutes), customer:customers(id, name, phone), property:properties(id, label, address_line, area, city), technician:technicians(id, name, phone)'
+      '*, service:services(id, name, category, duration_minutes), customer:customers(id, name, phone), property:properties(*), technician:technicians(id, name, phone)'
     )
       .eq('id', bookingId)
       .maybeSingle(),

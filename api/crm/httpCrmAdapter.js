@@ -299,12 +299,15 @@ function createHttpCrmAdapter(overrides = {}) {
   }
 
   return {
-    async findCustomerByPhone(phone) {
+    async findCustomerByPhone(phone, { profileName } = {}) {
       const existing = asList(await request('findCustomerByPhone', 'get', { query: { phone } }), 'customers', 'items')[0];
+      // The client CRM owns existing customers' names; the WhatsApp profile
+      // name is only offered when a new customer is registered.
       if (existing) return { ...mapCustomer(existing), returningCustomer: true };
       // Same behaviour as the Supabase adapter: a WhatsApp number is enough to
       // register a home-services customer on first contact.
-      const created = await write('createCustomer', 'post', { body: { phone, source: 'whatsapp' } }, { conflictCode: 'CUSTOMER_EXISTS' })
+      const body = { phone, source: 'whatsapp', ...(profileName ? { name: profileName } : {}) };
+      const created = await write('createCustomer', 'post', { body }, { conflictCode: 'CUSTOMER_EXISTS' })
         .catch(async (error) => {
           if (error.code !== 'CUSTOMER_EXISTS') throw error;
           // Created concurrently by another message: read it back.

@@ -71,7 +71,7 @@ async function processInboundMessage(originalInbound) {
   }
 
   const session = await sessionStore.getOrCreateSession(from);
-  const customerRecord = await crm.findCustomerByPhone(from);
+  const customerRecord = await crm.findCustomerByPhone(from, { profileName: inbound.profileName });
   const profile = await loadCustomerProfile(customerRecord);
   const customer = customerRecord ? { ...customerRecord, profile } : customerRecord;
   session.customerProfile = profile;

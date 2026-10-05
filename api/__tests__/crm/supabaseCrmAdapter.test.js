@@ -73,6 +73,32 @@ describe('supabaseCrmAdapter', () => {
     expect(db.upsert).not.toHaveBeenCalled();
   });
 
+  it('uses the WhatsApp profile name for a new customer', async () => {
+    db.get.mockResolvedValueOnce([]);
+    db.upsert.mockResolvedValueOnce([{ id: 'cust1', phone: '971500', name: 'Lal Sebastian' }]);
+    const customer = await crm.findCustomerByPhone('971500', { profileName: 'Lal Sebastian' });
+    expect(db.upsert).toHaveBeenCalledWith('customers', { phone: '971500', name: 'Lal Sebastian' }, { onConflict: 'phone' });
+    expect(customer.name).toBe('Lal Sebastian');
+  });
+
+  it('fills an empty name from the WhatsApp profile, only if still empty', async () => {
+    db.get.mockResolvedValueOnce([{ id: 'cust1', phone: '971500', name: null }]);
+    db.patch.mockResolvedValueOnce([{ id: 'cust1' }]);
+    const customer = await crm.findCustomerByPhone('971500', { profileName: 'Lal' });
+    expect(db.patch).toHaveBeenCalledWith('customers', 'id=eq.cust1&name=is.null', { name: 'Lal' });
+    expect(customer.name).toBe('Lal');
+  });
+
+  it('never overwrites a name staff entered, and survives a failed name update', async () => {
+    db.get.mockResolvedValueOnce([{ id: 'cust1', phone: '971500', name: 'Mr. Lal (VIP)' }]);
+    expect((await crm.findCustomerByPhone('971500', { profileName: 'lal' })).name).toBe('Mr. Lal (VIP)');
+    expect(db.patch).not.toHaveBeenCalled();
+
+    db.get.mockResolvedValueOnce([{ id: 'cust1', phone: '971500', name: null }]);
+    db.patch.mockRejectedValueOnce(new Error('network'));
+    expect((await crm.findCustomerByPhone('971500', { profileName: 'Lal' })).id).toBe('cust1');
+  });
+
   it('updates a validated default property without modifying another customer property', async () => {
     db.get
       .mockResolvedValueOnce([{ id: 'prop1' }])

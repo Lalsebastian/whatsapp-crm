@@ -3,6 +3,7 @@ import { complaintStatus } from '@/lib/status';
 import { RecordDrawer } from '@/components/data/RecordDrawer';
 import { BookingWorkflow } from '@/components/data/BookingWorkflow';
 import { humanise, BOOKING_STATUS_OPTIONS } from '@/views/agent/agentRecordUtils';
+import { ServiceAddress } from '@/components/data/ServiceAddress';
 
 // Record drawers for a single complaint or booking.
 
@@ -45,6 +46,7 @@ export function BookingDetail({ booking, onOpenChange, navigation }) {
         ['Status', BOOKING_STATUS_OPTIONS[booking.status] ?? booking.status],
         ['Customer', booking.customer?.name ?? formatPhone(booking.customer?.phone)],
         ['Phone', formatPhone(booking.customer?.phone)],
+        ['Service address', <ServiceAddress key="address" property={booking.property} />],
         ['Scheduled date', formatDate(booking.scheduled_date)],
         ['Scheduled time', booking.scheduled_time],
         ['Notes', booking.notes ?? booking.agent_notes],

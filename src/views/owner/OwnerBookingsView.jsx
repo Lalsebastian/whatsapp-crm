@@ -21,6 +21,7 @@ import { Panel, PanelBody, PanelHeader, PanelTitle } from '@/components/layout/P
 import { toast } from '@/lib/toast';
 import { STATUS_BAR_COLOR, humanise, recordNavigation } from '@/views/owner/ownerRecordUtils';
 import { RecordBulkActions } from '@/views/owner/OwnerRecordParts';
+import { ServiceAddress } from '@/components/data/ServiceAddress';
 
 export function OwnerBookings({ overview }) {
   const { series, daily } = overview;
@@ -199,6 +200,7 @@ function OwnerBookingRecords() {
           ['Service', detail.service?.name],
           ['Customer', detail.customer?.name],
           ['Phone', formatPhone(detail.customer?.phone)],
+          ['Service address', <ServiceAddress key="address" property={detail.property} />],
           ['Scheduled', `${formatDate(detail.scheduled_date)} ${detail.scheduled_time?.slice(0, 5) ?? ''}`],
           ['Status', BOOKING_STATUS[detail.status]?.label ?? humanise(detail.status)],
           ['Value', formatCurrency(detail.price)],

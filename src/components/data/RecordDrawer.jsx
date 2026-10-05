@@ -58,7 +58,7 @@ export function RecordDrawer({ record, title, description, fields = [], timeline
             </div>
             <dl className="grid gap-3 sm:grid-cols-2">
               {fields.map(([label, value]) => {
-                const wide = ['Notes', 'Description', 'Conversation summary'].includes(label);
+                const wide = ['Notes', 'Description', 'Conversation summary', 'Service address'].includes(label);
                 return (
                   <div
                     key={label}

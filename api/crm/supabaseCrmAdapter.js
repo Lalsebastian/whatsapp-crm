@@ -2,6 +2,7 @@
 // api/db/schema.sql. This is what makes the chatbot end-to-end testable today,
 // ahead of the client's real CRM API being documented (see httpCrmAdapter.js).
 const db = require('../db/supabaseClient');
+const logger = require('../utils/logger');
 const { generateReference } = require('../utils/reference');
 const { todayInTimeZone, minutesNowInTimeZone, addDays } = require('../flows/dateUtils');
 const { normalizeSlots, minutesOf } = require('./slots');
@@ -127,12 +128,25 @@ async function completePendingFeedback(row, { customerId, bookingId, rating, com
   return completedFeedback(await getSurveyRowsForBooking(customerId, bookingId));
 }
 
-async function findCustomerByPhone(phone) {
+// `profileName` is the WhatsApp profile name from the webhook. It fills an
+// empty name only: a name staff entered is never overwritten.
+async function findCustomerByPhone(phone, { profileName } = {}) {
   const existing = await db.get('customers', `phone=eq.${encodeURIComponent(phone)}&select=*`);
-  if (existing && existing.length > 0) return { ...mapCustomer(existing[0]), returningCustomer: true };
+  if (existing && existing.length > 0) {
+    const customer = mapCustomer(existing[0]);
+    if (!customer.name && profileName) {
+      try {
+        await db.patch('customers', `id=eq.${encodeURIComponent(customer.id)}&name=is.null`, { name: profileName });
+        customer.name = profileName;
+      } catch (error) {
+        logger.warn('CRM', 'Could not save the WhatsApp profile name:', error.message);
+      }
+    }
+    return { ...customer, returningCustomer: true };
+  }
   // A WhatsApp phone number is enough identification for a home-services
   // customer — auto-register on first contact rather than forcing a signup step.
-  const created = await db.upsert('customers', { phone }, { onConflict: 'phone' });
+  const created = await db.upsert('customers', { phone, ...(profileName ? { name: profileName } : {}) }, { onConflict: 'phone' });
   return { ...mapCustomer(Array.isArray(created) ? created[0] : created), returningCustomer: false };
 }
 

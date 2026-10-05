@@ -8,6 +8,22 @@ const { isWithinServiceWindow } = require('../../whatsapp/serviceWindow');
 const testChannel = require('../../whatsapp/testChannel');
 const sessionStore = require('../../session/sessionStore');
 
+describe('WhatsApp profile name', () => {
+  it('attaches each sender\'s profile name to their messages', () => {
+    const { messages } = parseWebhookBody({
+      entry: [{ changes: [{ field: 'messages', value: {
+        contacts: [{ wa_id: '919910992795', profile: { name: ' Lal Sebastian ' } }],
+        messages: [
+          { from: '919910992795', id: 'w1', timestamp: '1', type: 'text', text: { body: 'hi' } },
+          { from: '971500000000', id: 'w2', timestamp: '2', type: 'text', text: { body: 'hello' } },
+        ],
+      } }] }],
+    });
+    expect(messages[0]).toMatchObject({ from: '919910992795', profileName: 'Lal Sebastian' });
+    expect(messages[1]).not.toHaveProperty('profileName');
+  });
+});
+
 describe('webhook body parsing', () => {
   it('returns an empty list for status-only callbacks and malformed bodies', () => {
     expect(normalizeInboundMessages({ entry: [{ changes: [{ value: { statuses: [{ status: 'read' }] } }] }] })).toEqual([]);

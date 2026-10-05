@@ -51,7 +51,7 @@
  * @property {string} status
  *
  * @typedef {Object} CrmAdapter
- * @property {(phone: string) => Promise<Customer>} findCustomerByPhone
+ * @property {(phone: string, options?: {profileName?: string}) => Promise<Customer>} findCustomerByPhone
  * @property {(customerId: string) => Promise<Property[]>} getCustomerProperties
  * @property {(customerId: string) => Promise<{customerId: string, preferredLanguage: string, defaultPropertyId?: string|null}|null>} getCustomerPreferences
  * @property {(customerId: string, input: {preferredLanguage?: string, defaultPropertyId?: string}) => Promise<Object>} updateCustomerPreferences
