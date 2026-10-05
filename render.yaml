@@ -51,11 +51,19 @@ services:
         value: "true"
       - key: COST_CURRENCY
         value: USD
-      # Reverse geocoding for location pins: none | google | nominatim.
+      # Locations and service area (see .env.example).
       - key: GEOCODING_PROVIDER
-        value: none
+        value: google
       - key: GOOGLE_MAPS_API_KEY
         sync: false
+      - key: GEOCODING_COUNTRY
+        value: IN
+      - key: SERVICEABLE_PINCODES
+        sync: false
+      - key: SERVICEABLE_CITIES
+        sync: false
+      - key: EMERGENCY_PHONE_NUMBER
+        value: "112"
       - key: NOMINATIM_CONTACT_EMAIL
         sync: false
       # Voice-data privacy and retention.

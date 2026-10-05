@@ -15,6 +15,7 @@ const { isClearlyStale } = require('./messageOrder');
 const { entryPoints } = require('./flowRegistry');
 const sessionStore = require('../session/sessionStore');
 const takeover = require('../escalation/takeover');
+const mapsLink = require('../geo/mapsLink');
 const whatsapp = require('../whatsapp/client');
 const db = require('../db/supabaseClient');
 const logger = require('../utils/logger');
@@ -46,7 +47,8 @@ async function logMessage(phone, direction, type, content, extra = {}) {
 
 // Core handler shared by the real webhook and /api/chat/test.
 // Returns a small summary object useful for the test endpoint's response.
-async function processInboundMessage(inbound) {
+async function processInboundMessage(originalInbound) {
+  let inbound = originalInbound;
   const { from } = inbound;
 
   const { correlationId } = getRequestContext();
@@ -133,6 +135,9 @@ async function processInboundMessage(inbound) {
   if (session.humanTakeover && await takeover.releaseIfEnded(session, inbound)) {
     Object.assign(session, { humanTakeover: false, currentFlow: null, currentStep: null, context: {} });
   }
+  // A pasted Google Maps link becomes a location pin, so address steps
+  // accept it exactly like WhatsApp's own location share.
+  if (!session.humanTakeover) inbound = await mapsLink.locationFromMapsText(inbound);
   if (session.humanTakeover) {
     await sessionStore.touchActivity(from);
     logger.log('ROUTER', `Human takeover active for ${from} — suppressing auto-reply`);

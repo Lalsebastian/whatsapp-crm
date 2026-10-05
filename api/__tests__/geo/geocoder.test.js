@@ -6,7 +6,7 @@ const geocoder = require('../../geo/geocoder');
 const savedEnv = { ...process.env };
 
 function setEnv(values) {
-  for (const key of ['GEOCODING_PROVIDER', 'GOOGLE_MAPS_API_KEY', 'NOMINATIM_CONTACT_EMAIL', 'NOMINATIM_BASE_URL']) {
+  for (const key of ['GEOCODING_PROVIDER', 'GOOGLE_MAPS_API_KEY', 'NOMINATIM_CONTACT_EMAIL', 'NOMINATIM_BASE_URL', 'GEOCODING_COUNTRY']) {
     delete process.env[key];
   }
   Object.assign(process.env, values);
@@ -38,6 +38,48 @@ describe('reverse geocoding', () => {
     expect(geocoder.isEnabled()).toBe(false); // Nominatim policy: identify yourself
   });
 
+  it('reads the PIN code, locality and state of an Indian address', async () => {
+    setEnv({ GEOCODING_PROVIDER: 'google', GOOGLE_MAPS_API_KEY: 'g-key' });
+    getSpy.mockResolvedValue({
+      data: {
+        status: 'OK',
+        results: [{
+          formatted_address: 'Infopark Rd, Kakkanad, Kochi, Kerala 682042, India',
+          place_id: 'ChIJin',
+          geometry: { location: { lat: 10.0159, lng: 76.3419 }, location_type: 'GEOMETRIC_CENTER' },
+          address_components: [
+            { long_name: 'Infopark Road', types: ['route'] },
+            { long_name: 'Kakkanad', types: ['sublocality_level_1', 'sublocality', 'political'] },
+            { long_name: 'Kochi', types: ['locality', 'political'] },
+            { long_name: 'Ernakulam', types: ['administrative_area_level_3', 'political'] },
+            { long_name: 'Kerala', types: ['administrative_area_level_1', 'political'] },
+            { long_name: 'India', types: ['country', 'political'] },
+            { long_name: '682042', types: ['postal_code'] },
+          ],
+        }],
+      },
+    });
+
+    expect(await geocoder.reverseGeocode({ latitude: 10.0159, longitude: 76.3419 })).toMatchObject({
+      area: 'Kakkanad', city: 'Kochi', state: 'Kerala', postalCode: '682042', country: 'India',
+    });
+  });
+
+  it('looks up a typed address within the configured country (Google only)', async () => {
+    setEnv({ GEOCODING_PROVIDER: 'google', GOOGLE_MAPS_API_KEY: 'g-key', GEOCODING_COUNTRY: 'in' });
+    getSpy.mockResolvedValue({ data: { status: 'OK', results: [{
+      formatted_address: 'Kakkanad, Kochi, Kerala 682030, India',
+      geometry: { location: { lat: 10.01, lng: 76.34 }, location_type: 'APPROXIMATE' },
+      address_components: [{ long_name: '682030', types: ['postal_code'] }, { long_name: 'Kochi', types: ['locality'] }],
+    }] } });
+
+    expect(await geocoder.geocodeAddress('Flat 3B, Skyline Apartments, Kakkanad')).toMatchObject({ postalCode: '682030', city: 'Kochi', latitude: 10.01 });
+    expect(getSpy.mock.calls[0][1].params).toMatchObject({ address: 'Flat 3B, Skyline Apartments, Kakkanad', components: 'country:IN', region: 'in' });
+
+    setEnv({ GEOCODING_PROVIDER: 'nominatim', NOMINATIM_CONTACT_EMAIL: 'ops@example.com' });
+    expect(await geocoder.geocodeAddress('Flat 3B, Skyline Apartments, Kakkanad')).toBeNull();
+  });
+
   it('maps a Google result to address line, area and city', async () => {
     setEnv({ GEOCODING_PROVIDER: 'google', GOOGLE_MAPS_API_KEY: 'g-key' });
     getSpy.mockResolvedValue({
@@ -58,7 +100,7 @@ describe('reverse geocoding', () => {
 
     const result = await geocoder.reverseGeocode({ latitude: 25.0805, longitude: 55.1403 });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       formattedAddress: 'Marina Walk - Dubai Marina - Dubai - United Arab Emirates',
       addressLine: 'Marina Walk',
       area: 'Dubai Marina',

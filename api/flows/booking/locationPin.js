@@ -16,6 +16,8 @@ function propertyInput(addressLine, pin = null, geocoded = null, label = undefin
   if (label) input.label = label;
   if (geocoded && geocoded.area) input.area = geocoded.area;
   if (geocoded && geocoded.city) input.city = geocoded.city;
+  if (geocoded && geocoded.postalCode) input.postalCode = geocoded.postalCode;
+  if (geocoded && geocoded.state) input.state = geocoded.state;
   if (pin && Number.isFinite(pin.latitude) && Number.isFinite(pin.longitude)) {
     input.latitude = pin.latitude;
     input.longitude = pin.longitude;
@@ -43,10 +45,14 @@ function pinLocation(property, pin, address) {
  * Geocodes a pin that arrived without an address and, when it resolves,
  * asks the customer to confirm it and add unit details.
  * @param {'booking'|'recommendation'} purpose where to continue afterwards
+ * @param {object|null} [alreadyGeocoded] result of an earlier reverseGeocode
+ *   for this pin (null = it found nothing); omitted = geocode now
  * @returns {Promise<boolean>} true when the prompt was sent
  */
-async function promptGeocodedPin(session, context, pin, purpose) {
-  const geocoded = await reverseGeocode(pin);
+async function promptGeocodedPin(session, context, pin, purpose, alreadyGeocoded) {
+  // A shared Maps link may name the place even when geocoding is off.
+  const geocoded = (alreadyGeocoded !== undefined ? alreadyGeocoded : await reverseGeocode(pin))
+    || (pin.placeName ? { formattedAddress: pin.placeName, provider: 'maps_link' } : null);
   if (!geocoded) return false;
   await whatsapp.sendButtons(
     session.phone,
@@ -62,8 +68,12 @@ async function promptGeocodedPin(session, context, pin, purpose) {
       formattedAddress: geocoded.formattedAddress,
       area: geocoded.area || null,
       city: geocoded.city || null,
+      state: geocoded.state || null,
+      postalCode: geocoded.postalCode || null,
       placeId: geocoded.placeId || null,
       purpose,
+      // The booking path checked the service area before showing this.
+      serviceAreaChecked: purpose === 'booking' && !!context.serviceId,
     },
   }));
   logger.audit('LOCATION_PIN_ADDRESS_SUGGESTED', {
@@ -86,12 +96,15 @@ async function savePinAddress(customer, pending, details) {
   const addressLine = details
     ? `${details.trim()}, ${pending.formattedAddress}`
     : pending.formattedAddress;
-  const geocoded = { area: pending.area, city: pending.city, placeId: pending.placeId };
+  const geocoded = { area: pending.area, city: pending.city, state: pending.state, postalCode: pending.postalCode, placeId: pending.placeId };
   const property = await crm.addProperty(
     customer.id,
     propertyInput(addressLine, pending, geocoded, pending.label || undefined)
   );
-  return { property, location: pinLocation(property, pending, addressLine) };
+  return {
+    property,
+    location: { ...pinLocation(property, pending, addressLine), postalCode: pending.postalCode || null, city: pending.city || null, state: pending.state || null },
+  };
 }
 
 module.exports = { propertyInput, pinLocation, promptGeocodedPin, savePinAddress };

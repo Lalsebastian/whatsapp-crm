@@ -161,6 +161,7 @@ async function resolveInput(session, inbound) {
       text: inbound.text,
       source: inbound.source,
       voice: inbound.voice,
+      mapsLink: inbound.mapsLink,
       ai,
     };
   }

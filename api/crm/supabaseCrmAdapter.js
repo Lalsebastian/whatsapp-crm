@@ -26,6 +26,8 @@ function mapProperty(row) {
     isDefault: !!row.is_default,
     latitude: row.latitude ?? null,
     longitude: row.longitude ?? null,
+    postalCode: row.postal_code ?? null,
+    state: row.state ?? null,
   };
 }
 
@@ -205,25 +207,27 @@ async function addProperty(customerId, property) {
     label: property.label || null,
     address_line: property.addressLine,
     area: property.area || null,
-    city: property.city || 'Dubai',
+    city: property.city || process.env.DEFAULT_CITY || null,
   };
   const hasCoordinates = Number.isFinite(property.latitude) && Number.isFinite(property.longitude);
-  const located = hasCoordinates
-    ? {
-      ...row,
+  const extras = {
+    ...(hasCoordinates ? {
       latitude: property.latitude,
       longitude: property.longitude,
       location_source: property.locationSource || null,
       place_id: property.placeId || null,
-    }
-    : row;
+    } : {}),
+    ...(property.postalCode ? { postal_code: property.postalCode } : {}),
+    ...(property.state ? { state: property.state } : {}),
+  };
+  const hasExtras = Object.keys(extras).length > 0;
   let created;
   try {
-    created = await db.insert('properties', located);
+    created = await db.insert('properties', { ...row, ...extras });
   } catch (error) {
-    // Coordinates are an enhancement: if the columns from the geocoding
-    // migration are not there yet, still save the address itself.
-    if (!hasCoordinates || !db.isMissingColumn(error)) throw error;
+    // Coordinates, PIN code and state are enhancements: if the columns from
+    // the migration are not there yet, still save the address itself.
+    if (!hasExtras || !db.isMissingColumn(error)) throw error;
     created = await db.insert('properties', row);
   }
   return mapProperty(Array.isArray(created) ? created[0] : created);
@@ -239,12 +243,50 @@ async function getServiceDetails(serviceId) {
   return rows && rows.length > 0 ? mapService(rows[0]) : null;
 }
 
-// The current Supabase CRM schema has no service-area table or coordinate
-// coverage rules. Returning an explicit capability result keeps the booking
-// sequence correct without inventing unsupported areas. A future CRM adapter
-// can replace this with a real service/location check before availability.
-async function checkServiceability(_serviceId, _location) {
-  return { serviceable: true, source: 'crm_not_configured' };
+// Service area for the bundled CRM, from configuration:
+//   SERVICEABLE_PINCODES  comma-separated PIN/postal codes ("682030,682042")
+//                         or prefixes ending in * ("6820*")
+//   SERVICEABLE_CITIES    comma-separated cities or localities ("Kochi,Kakkanad")
+// Nothing configured = everywhere is serviceable. A location is refused only
+// on positive evidence: a known PIN code outside the list, or (with no PIN
+// code) a known city/locality outside the list. With an external CRM, the
+// CRM's own serviceability endpoint decides.
+function listFromEnv(name) {
+  return String(process.env[name] || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
+}
+
+const RE_PIN_IN_TEXT = /\b([1-9]\d{2})\s?(\d{3})\b/;
+
+async function locationFacts(location = {}) {
+  let facts = { ...location };
+  if (location.propertyId && !location.postalCode && !location.city) {
+    const rows = await db.get('properties', `id=eq.${encodeURIComponent(location.propertyId)}&select=*&limit=1`);
+    const property = mapProperty(rows && rows[0]);
+    if (property) facts = { ...facts, postalCode: property.postalCode, city: property.city, area: property.area, address: property.addressLine };
+  }
+  if (!facts.postalCode) {
+    const match = String(facts.address || '').match(RE_PIN_IN_TEXT);
+    if (match) facts.postalCode = `${match[1]}${match[2]}`;
+  }
+  return facts;
+}
+
+async function checkServiceability(_serviceId, location) {
+  const pincodes = listFromEnv('SERVICEABLE_PINCODES');
+  const cities = listFromEnv('SERVICEABLE_CITIES');
+  if (pincodes.length === 0 && cities.length === 0) return { serviceable: true, source: 'crm_not_configured' };
+  const facts = await locationFacts(location);
+  const postal = String(facts.postalCode || '').replace(/\s+/g, '').toLowerCase();
+  if (postal && pincodes.length > 0) {
+    const covered = pincodes.some((rule) => (rule.endsWith('*') ? postal.startsWith(rule.slice(0, -1)) : postal === rule));
+    return { serviceable: covered, source: 'pincode', postalCode: facts.postalCode };
+  }
+  const names = [facts.city, facts.areaName, facts.area].filter(Boolean).map((name) => String(name).toLowerCase());
+  if (names.length > 0 && cities.length > 0) {
+    const covered = names.some((name) => cities.includes(name));
+    return { serviceable: covered, source: 'city', city: facts.city || facts.areaName || facts.area };
+  }
+  return { serviceable: true, source: 'insufficient_location' };
 }
 
 // Builds structured slots for one day from the fixed slot grid: removes

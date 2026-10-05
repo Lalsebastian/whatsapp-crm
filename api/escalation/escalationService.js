@@ -38,10 +38,16 @@ function safetyReason(text) {
   return urgentReason(text);
 }
 
+// The local emergency number for safety guidance (112 in India and from
+// mobiles in most countries; set 997 for UAE Civil Defence, etc.).
+function emergencyNumber() {
+  return String(process.env.EMERGENCY_PHONE_NUMBER || '112').trim();
+}
+
 function safetyGuidanceFor(text) {
   const dictionaryReason = urgentReason(text);
   if (RE_GAS.test(text)) {
-    return 'For your safety: please don’t switch any lights or appliances on or off, open the windows, and leave the area. If the smell is strong, call emergency services on 997. I’m escalating this to our support team now.';
+    return `For your safety: please don’t switch any lights or appliances on or off, open the windows, and leave the area. If the smell is strong, call emergency services on ${emergencyNumber()}. I’m escalating this to our support team now.`;
   }
   if (RE_URGENT_ELECTRICAL.test(text) || dictionaryReason === 'electrical_safety_concern') {
     return 'For safety, please avoid using the affected switch, socket, or appliance and keep clear of the area. I’m escalating this to our support team now.';

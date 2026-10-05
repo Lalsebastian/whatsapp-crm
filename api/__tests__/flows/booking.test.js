@@ -420,7 +420,7 @@ describe('booking flow — select_service step', () => {
     await booking.steps.select_service(session, { id: 'cust1' }, { text: 'what time do you close' });
 
     expect(whatsapp.sendListMessage).toHaveBeenCalledWith(
-      '971500', expect.stringContaining("couldn't confidently match"), 'Choose service', expect.any(Array)
+      '971500', expect.stringContaining('not sure which of our services covers that'), 'Choose service', expect.any(Array)
     );
     expect(fakeCrm.getCustomerProperties).not.toHaveBeenCalled();
   });
@@ -729,10 +729,15 @@ describe('booking flow — hybrid field collection', () => {
 
     expect(fakeCrm.checkServiceability).toHaveBeenCalledTimes(1);
     expect(fakeCrm.getAvailability).not.toHaveBeenCalled();
-    expect(whatsapp.sendText).toHaveBeenCalledWith('971500', expect.stringContaining('outside the service area'));
-    expect(sessionStore.setFlow).toHaveBeenCalledWith(
-      '971500', 'booking', 'awaiting_new_property', expect.objectContaining({ propertyId: undefined })
+    expect(whatsapp.sendButtons).toHaveBeenCalledWith(
+      '971500',
+      expect.stringContaining('outside our service area for Plumbing'),
+      // Its only saved address is the refused one, so no "Saved Addresses".
+      [{ id: 'MAIN_MENU', title: 'Main Menu' }]
     );
+    const [, , step, context] = sessionStore.setFlow.mock.calls.at(-1);
+    expect(step).toBe('awaiting_new_property');
+    expect(context.propertyId).toBeUndefined();
   });
 
   it('keeps the customer in the date step after invalid input', async () => {

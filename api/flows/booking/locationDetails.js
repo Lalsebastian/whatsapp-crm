@@ -34,6 +34,7 @@ async function handleAwaitingLocationDetails(session, customer, input) {
     propertyId: property.id,
     propertyLabel: propertyDisplay(property),
     location,
+    ...(pendingLocation.serviceAreaChecked ? { serviceAreaChecked: property.id } : {}),
   };
   if (pendingLocation.purpose === 'recommendation') {
     return promptRecommendedServices(session, customer, await crm.getServices(), nextContext);

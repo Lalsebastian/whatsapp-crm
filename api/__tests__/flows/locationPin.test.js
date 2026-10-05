@@ -114,7 +114,7 @@ describe('booking flow — WhatsApp location pins', () => {
 
     await booking.steps.select_property({ phone: '971500', context }, { id: 'cust1' }, { location: pin });
 
-    expect(whatsapp.sendText.mock.calls[0][1]).toContain('Please also send the full address');
+    expect(whatsapp.sendText.mock.calls[0][1]).toContain('building or villa name, flat/villa number');
     expect(sessionStore.setFlow).toHaveBeenCalledWith('971500', 'booking', 'awaiting_new_property', expect.objectContaining({
       location: expect.objectContaining({ latitude: 25.0805 }),
     }));

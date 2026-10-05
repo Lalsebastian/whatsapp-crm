@@ -398,7 +398,7 @@ async function handleSelectService(session, customer, input) {
   }
   const message = input.buttonId
     ? "I'm sorry, that service is no longer available. Please select another service."
-    : "I couldn't confidently match that request to an available service. Please select the closest option below.";
+    : 'I\'m not sure which of our services covers that. Please choose the closest one below, or type "support" and our team will help.';
   await promptServiceList(session, services, voiceContext, message);
 }
 

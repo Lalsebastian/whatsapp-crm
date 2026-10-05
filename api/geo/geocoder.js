@@ -25,6 +25,9 @@ function config() {
     nominatimBaseUrl: (process.env.NOMINATIM_BASE_URL || 'https://nominatim.openstreetmap.org').replace(/\/+$/, ''),
     nominatimContact: process.env.NOMINATIM_CONTACT_EMAIL || '',
     language: process.env.GEOCODING_LANGUAGE || 'en',
+    // ISO country code that typed addresses are searched in (e.g. IN), so
+    // "MG Road" is not matched in another country. Empty = anywhere.
+    country: String(process.env.GEOCODING_COUNTRY || '').trim().toUpperCase(),
     timeoutMs: Number(process.env.GEOCODING_TIMEOUT_MS) > 0 ? Number(process.env.GEOCODING_TIMEOUT_MS) : 5000,
   };
 }
@@ -76,9 +79,30 @@ function component(components, ...types) {
   return match ? match.long_name : null;
 }
 
-async function googleReverse({ latitude, longitude }, settings) {
+function fromGoogleResult(best) {
+  const components = best.address_components;
+  const street = [component(components, 'street_number'), component(components, 'route')].filter(Boolean).join(' ');
+  const location = best.geometry && best.geometry.location;
+  return {
+    formattedAddress: best.formatted_address,
+    addressLine: street || component(components, 'premise', 'establishment', 'point_of_interest') || best.formatted_address,
+    area: component(components, 'neighborhood', 'sublocality_level_1', 'sublocality', 'sublocality_level_2'),
+    city: component(components, 'locality', 'administrative_area_level_3', 'administrative_area_level_2'),
+    state: component(components, 'administrative_area_level_1'),
+    postalCode: component(components, 'postal_code'),
+    country: component(components, 'country'),
+    latitude: location ? Number(location.lat) : null,
+    longitude: location ? Number(location.lng) : null,
+    precision: (best.geometry && best.geometry.location_type) || null,
+    partialMatch: !!best.partial_match,
+    placeId: best.place_id || null,
+    provider: 'google',
+  };
+}
+
+async function googleRequest(params, settings) {
   const response = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
-    params: { latlng: `${latitude},${longitude}`, key: settings.googleKey, language: settings.language },
+    params: { ...params, key: settings.googleKey, language: settings.language },
     timeout: settings.timeoutMs,
   });
   const data = response.data || {};
@@ -89,18 +113,18 @@ async function googleReverse({ latitude, longitude }, settings) {
     throw error;
   }
   const best = (data.results || [])[0];
-  if (!best) return null;
-  const components = best.address_components;
-  const street = [component(components, 'street_number'), component(components, 'route')].filter(Boolean).join(' ');
-  return {
-    formattedAddress: best.formatted_address,
-    addressLine: street || component(components, 'premise', 'establishment', 'point_of_interest') || best.formatted_address,
-    area: component(components, 'neighborhood', 'sublocality', 'sublocality_level_1'),
-    city: component(components, 'locality', 'administrative_area_level_1'),
-    country: component(components, 'country'),
-    placeId: best.place_id || null,
-    provider: 'google',
-  };
+  return best ? fromGoogleResult(best) : null;
+}
+
+async function googleForward(text, settings) {
+  return googleRequest({
+    address: text,
+    ...(settings.country ? { components: `country:${settings.country}`, region: settings.country.toLowerCase() } : {}),
+  }, settings);
+}
+
+async function googleReverse({ latitude, longitude }, settings) {
+  return googleRequest({ latlng: `${latitude},${longitude}` }, settings);
 }
 
 async function nominatimReverse({ latitude, longitude }, settings) {
@@ -117,15 +141,19 @@ async function nominatimReverse({ latitude, longitude }, settings) {
     formattedAddress: data.display_name,
     addressLine: street || address.building || address.amenity || data.display_name.split(',')[0],
     area: address.neighbourhood || address.suburb || address.quarter || address.city_district || null,
-    city: address.city || address.town || address.village || address.state || null,
+    city: address.city || address.town || address.village || address.county || null,
+    state: address.state || null,
+    postalCode: address.postcode || null,
     country: address.country || null,
+    latitude: Number(data.lat),
+    longitude: Number(data.lon),
     placeId: data.place_id ? `osm:${data.osm_type || ''}:${data.osm_id || data.place_id}` : null,
     provider: 'nominatim',
   };
 }
 
 /**
- * @returns {Promise<{formattedAddress: string, addressLine: string, area: string|null, city: string|null, country: string|null, placeId: string|null, provider: string}|null>}
+ * @returns {Promise<{formattedAddress: string, addressLine: string, area: string|null, city: string|null, state: string|null, postalCode: string|null, country: string|null, placeId: string|null, provider: string}|null>}
  *   null when disabled, unresolvable, or the provider failed (never throws)
  */
 async function reverseGeocode({ latitude, longitude }) {
@@ -163,9 +191,37 @@ async function reverseGeocode({ latitude, longitude }) {
   }
 }
 
+/**
+ * Looks up a typed address (Google only) to find its PIN/postal code,
+ * locality and coordinates for the service-area check. A result is a hint:
+ * the customer's own text stays the saved address line.
+ * @returns {Promise<object|null>} same shape as reverseGeocode, or null
+ */
+async function geocodeAddress(text) {
+  const query = String(text || '').trim();
+  const settings = config();
+  if (!isEnabled() || settings.provider !== 'google' || query.length < 5) return null;
+  const key = `${settings.provider}:fwd:${settings.country}:${query.toLowerCase()}`;
+  const cached = fromCache(key);
+  if (cached !== undefined) return cached;
+  const startedAt = Date.now();
+  try {
+    breaker.assertAvailable();
+    const result = await withTimeout(() => googleForward(query, settings), settings.timeoutMs + 500, 'geocoding.forward');
+    breaker.recordSuccess();
+    remember(key, result);
+    logger.audit('ADDRESS_GEOCODED', { provider: settings.provider, latencyMs: Date.now() - startedAt, result: result ? 'success' : 'no_result' });
+    return result;
+  } catch (error) {
+    if (error.code !== 'CIRCUIT_OPEN') breaker.recordFailure();
+    logger.warn('GEOCODING', 'Address lookup failed:', error.code || (error.response && error.response.status) || error.message);
+    return null;
+  }
+}
+
 function clearForTests() {
   cache.clear();
   breaker.recordSuccess();
 }
 
-module.exports = { reverseGeocode, isEnabled, isValidCoordinate, clearForTests };
+module.exports = { reverseGeocode, geocodeAddress, isEnabled, isValidCoordinate, clearForTests };

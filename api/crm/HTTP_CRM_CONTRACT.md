@@ -47,7 +47,7 @@ Customer: `{ "id", "phone", "name", "preferredLanguage" }`
 | Method | Default path | Request | Response |
 |---|---|---|---|
 | `getCustomerProperties` | `GET /customers/{customerId}/properties` | | Array of properties |
-| `addProperty` | `POST /customers/{customerId}/properties` | `{ "addressLine", "label"?, "area"?, "city"?, "latitude"?, "longitude"?, "locationSource"?, "placeId"? }` | The created property |
+| `addProperty` | `POST /customers/{customerId}/properties` | `{ "addressLine", "label"?, "area"?, "city"?, "postalCode"?, "state"?, "latitude"?, "longitude"?, "locationSource"?, "placeId"? }` | The created property |
 
 Property: `{ "id", "customerId", "label", "addressLine", "area", "city", "isDefault", "latitude", "longitude" }`
 
@@ -61,11 +61,21 @@ and flat details.
 |---|---|---|---|
 | `getServices` | `GET /services?active=true` | | Array of services |
 | `getServiceDetails` | `GET /services/{serviceId}` | | Service, or `404` |
-| `checkServiceability` | `POST /services/{serviceId}/serviceability` | `{ "location": { "propertyId", "address", "latitude", "longitude", "areaName", "source" } }` | `{ "serviceable": true }` |
+| `checkServiceability` | `POST /services/{serviceId}/serviceability` | `{ "location": Location }` | `{ "serviceable": true }` |
 | `getAvailability` | `GET /services/{serviceId}/availability?date=YYYY-MM-DD` | | `{ "slots": [Slot] }` |
 | `getAvailabilityRange` | `GET /services/{serviceId}/availability?from=YYYY-MM-DD&days=7[&lat=&lng=]` | | `{ "days": [{ "date": "YYYY-MM-DD", "slots": [Slot] }] }` |
 
 Service: `{ "id", "name", "category", "description", "basePrice", "durationMinutes" }`
+
+Location (every field optional; the bot sends what it knows):
+`{ "propertyId", "address", "latitude", "longitude", "postalCode", "areaName", "city", "state", "country", "source" }`.
+`source` is `whatsapp_location`, `maps_link`, `typed_address` or
+`saved_property`. A new address is checked **before** it is saved, so it has
+no `propertyId` yet; a saved address is sent by `propertyId`. `postalCode`
+comes from Google geocoding of a pin/link, or from a 6-digit PIN code in the
+typed text. Answer `{ "serviceable": false }` only when the location is known
+to be outside coverage; when the CRM cannot tell (e.g. no PIN code), answer
+`true`, as the booking itself is validated again on creation.
 
 Slot: `{ "id", "start": "HH:MM", "end": "HH:MM", "startsAt"?: ISO-8601, "endsAt"?: ISO-8601, "timezone"?: "Asia/Dubai", "label"? }`.
 A plain `"HH:MM"` string is also accepted. Only return slots that can still
